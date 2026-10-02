@@ -290,13 +290,13 @@ function iniciarTemporada(){
   for(const dv of DIVS){ const ids=clubesDaDiv(dv); G.fix[dv]=gerarRodadas(ids); G.tab[dv]={}; ids.forEach(id=>G.tab[dv][id]={p:0,j:0,v:0,e:0,d:0,gp:0,gc:0}); }
   G.cal=[]; let f=0;
   for(let r=1;r<=22;r++){ G.cal.push({t:"L",r}); if(RODADAS_COPA.includes(r)) G.cal.push({t:"C",f:f++}); }
-  G.cal.push({t:"P"});
+  G.cal.push({t:"P"}); sortearClima();
   G.copa={vivos:Object.keys(G.div).filter(id=>!SENTINELAS.includes(id)),chave:null,campeao:null,minhaFase:null,alc:{}};
   sortearCopa();
   for(const id in G.jog){ const p=G.jog[id]; p.st={j:0,g:0,a:0,ns:0}; p.am=0; p.sus=0; p.les=0; p.cond=100; }
   for(const id in G.cl) G.cl[id].pat=Math.round((folha(id)*.85+{3:90e3,2:50e3,1:25e3}[tier(G.div[id])])/100)*100;
   G.fin={sal:0,pat:0,bil:0,prem:0,transf:0,obras:0};
-  G.st={j:0,v:0,e:0,d:0,gp:0,gc:0,ult:[],seqV:0,seqInv:0,zona:false};
+  G.st={j:0,v:0,e:0,d:0,gp:0,gc:0,ult:[],seqV:0,seqInv:0,zona:false}; G.evUsados=[];
   definirObjetivo();
 }
 function sortearCopa(){ const v=embaralhar(G.copa.vivos.slice()); G.copa.chave=[]; for(let i=0;i<v.length;i+=2) G.copa.chave.push([v[i],v[i+1]]); }
@@ -538,20 +538,22 @@ function criarPartida(j){
     return {id:cid,user,ment:user?G.ment:"N",subs:0,fin:0,posse:0,entraram:new Set(xi.map(x=>x.pid)),
       jog:xi.map(s=>({pid:s.pid,pos:s.pos,cond:user?G.jog[s.pid].cond:100,nota:6.2+rnd()*.6,am:0,out:false,les:false,g:0,as:0}))};
   };
-  M={j,min:0,fase:"1T",lados:[lado(j.casa),lado(j.fora)],gols:[0,0],ev:[],neutro:j.comp==="P",vac:null,pen:null,fim:false,pausa:true,vel:1,timer:null,todos:[],interativo:false,lances:0,decisao:null};
+  M={j,min:0,fase:"1T",lados:[lado(j.casa),lado(j.fora)],gols:[0,0],ev:[],neutro:j.comp==="P",vac:null,pen:null,fim:false,pausa:true,vel:1,timer:null,todos:[],interativo:false,lances:0,decisao:null,foco:G.foco,festa:G.festa&&j.casa===G.clubeId};
+  G.foco=null; G.festa=false;
   M.lados.forEach(L=>L.jog.forEach(x=>M.todos.push(x)));
   evento(0,-1,"info",`Bola rolando no ${M.neutro?"campo neutro":CL[j.casa].est}!`);
 }
 function evento(min,lado,tipo,txt){ M.ev.push({min,lado,tipo,txt}); }
 const ativos = L => L.jog.filter(x=>!x.out&&!x.les);
-const setoresLado = L => { const r=setores(ativos(L).map(x=>({pos:x.pos,e:efetivo(G.jog[x.pid],x.pos,x.cond)})),L.ment); return L.user?ajusteTatico(r):r; };
+const setoresLado = L => { const r=setores(ativos(L).map(x=>({pos:x.pos,e:efetivo(G.jog[x.pid],x.pos,x.cond)})),L.ment); if(!L.user) return r; if(M.foco==="A") r.a+=2; if(M.foco==="D") r.d+=2; if(M.festa){ r.a+=1.5; r.m+=1.5; } return ajusteTatico(r); };
 const nomeJ = x => G.jog[x.pid].n;
 function tickPartida(){
   M.min++;
   const S=M.lados.map(setoresLado); let [la,lb,posse]=lambdas(S[0],S[1],!M.neutro);
   if(M.vac!==null&&M.fase==="2T"){ if(M.vac===0){ la*=.3; lb*=2.4; } else { lb*=.3; la*=2.4; } }
   M.lados[0].posse+=posse; M.lados[1].posse+=1-posse;
-  const rit=fatorRitmo(); la*=rit; lb*=rit;
+  const rit=fatorRitmo()*climaAtual().g; la*=rit; lb*=rit;
+  if(climaAtual().z){ const md=(la+lb)/2; la=la*.8+md*.2; lb=lb*.8+md*.2; }
   const lam=[la,lb], peso=M.min>=89?2:1; // gol no fim é comum no Dugout
   for(let i=0;i<2;i++){
     const L=M.lados[i], at=ativos(L); if(!at.length) continue;
@@ -574,8 +576,8 @@ function tickPartida(){
       if(c.am>=1){ c.out=true; c.verm=true; c.nota-=1.5; evento(M.min,i,"verm",`🟥 Segundo amarelo! ${nomeJ(c)} está expulso.`); if(L.user) M.pausa=true; }
       else { c.am=1; c.nota-=.3; evento(M.min,i,"am",`🟨 Amarelo para ${nomeJ(c)}.`); }
     } else if(rnd()<.0007){ const c=sortearPeso(at,x=>PESO_CARTAO[x.pos]); c.out=true; c.verm=true; c.nota-=1.5; evento(M.min,i,"verm",`🟥 Vermelho direto para ${nomeJ(c)}!`); if(L.user) M.pausa=true; }
-    if(L.user&&rnd()<.0009){ const c=pick(at); c.les=true; evento(M.min,i,"les",`🚑 ${nomeJ(c)} sente e não tem condições de seguir.`); M.pausa=true; }
-    for(const x of ativos(L)) x.cond=Math.max(30,x.cond-(.13+rnd()*.1)*(L.ment==="O"?1.1:1)*(L.user?fatorCansaco():1));
+    if(L.user&&rnd()<.0009*(G.gramadoRuim>0&&M.j.casa===G.clubeId?2.5:1)){ const c=pick(at); c.les=true; evento(M.min,i,"les",`🚑 ${nomeJ(c)} sente e não tem condições de seguir.`); M.pausa=true; }
+    for(const x of ativos(L)) x.cond=Math.max(30,x.cond-(.13+rnd()*.1)*(L.ment==="O"?1.1:1)*(L.user?fatorCansaco():1)*climaAtual().c);
     if(!L.user){ // IA reage ao placar e mexe no time
       const dif=M.gols[i]-M.gols[1-i];
       if(M.min===60&&dif<0) L.ment="O"; if(M.min===78&&dif===1) L.ment="D";
@@ -596,6 +598,24 @@ function subsIA(L,i){
     if(cand&&ovrEm(cand,x.pos)>=ovrEm(G.jog[x.pid],x.pos)-6){ const novo={pid:cand.id,pos:x.pos,cond:100,nota:6.3,am:0,out:false,les:false,g:0,as:0}; L.jog[L.jog.indexOf(x)]=novo; M.todos.push(novo); L.entraram.add(cand.id); L.subs++; evento(M.min,i,"sub",`🔁 ${CL[L.id].c}: sai ${nomeJ(x)}, entra ${cand.n}.`); }
   });
 }
+/* ---------- clima ---------- */
+// g: multiplica os gols dos dois lados · c: multiplica o cansaço · z: aproxima as forças (mais zebra)
+const CLIMAS=[
+  {n:"Dia ensolarado",e:"☀️",g:1,c:1,p:4,txt:"Condições perfeitas para jogar."},
+  {n:"Sol forte",e:"🥵",g:1,c:1.25,p:2,txt:"O calor desgasta os dois times."},
+  {n:"Calor úmido",e:"🌡️",g:.95,c:1.3,p:1.5,txt:"Abafado: o ritmo cai no segundo tempo."},
+  {n:"Parcialmente nublado",e:"⛅",g:1,c:1,p:4,txt:"Tempo firme, nada a temer."},
+  {n:"Noite amena",e:"🌙",g:1.05,c:.95,p:3,txt:"Clima ideal, jogo solto."},
+  {n:"Chuva leve",e:"🌦️",g:1.08,c:1,p:2,txt:"Gramado rápido favorece quem ataca."},
+  {n:"Chuva forte",e:"🌧️",g:.85,c:1.1,p:1.2,txt:"Bola parando nas poças. Jogo truncado."},
+  {n:"Temporal",e:"⛈️",g:.75,c:1.15,p:.6,z:1,txt:"Campo pesado, quase impraticável. Zebra à vista."},
+  {n:"Muito vento",e:"🌬️",g:.95,c:1,p:1,z:1,txt:"Bola longa vira loteria."},
+  {n:"Frio intenso",e:"🥶",g:.95,c:.9,p:1,txt:"Ninguém cansa, mas ninguém se arrisca."},
+  {n:"Garoa e névoa",e:"🌫️",g:1,c:1,p:1,z:1,txt:"Visibilidade ruim, muitos erros de passe."},
+];
+const climaAtual = () => CLIMAS[G.clima===undefined?0:G.clima];
+function sortearClima(){ G.clima=CLIMAS.indexOf(sortearPeso(CLIMAS,c=>c.p)); }
+function efeitosClima(c){ const f=[]; if(c.g!==1) f.push(`gols ${c.g>1?"+":"−"}${Math.round(Math.abs(c.g-1)*100)}%`); if(c.c!==1) f.push(`cansaço ${c.c>1?"+":"−"}${Math.round(Math.abs(c.c-1)*100)}%`); if(c.z) f.push("mais zebra"); return f.join(" · ")||"sem efeito"; }
 /* ---------- lances interativos e pênaltis ---------- */
 // atributo do Dugout normalizado 0-1 (jogador gerado usa o overall como aproximação)
 function atr(p,nome){ const a=AT[p.id]; if(a) return clamp(a[D.atributos.indexOf(nome)]/50,0,1); return clamp((ovr(p)-45)/50,0,1); }
@@ -806,12 +826,13 @@ function fecharData(resU){
   if(eu.cx<0) mudarConf(-2,"fin");
   if(G.conf<30&&!G.avisoConf){ G.avisoConf=true; noticia(`📢 ${presDe(G.clubeId).n} cobra publicamente: “Do jeito que está, não dá para continuar.”`); }
   mercadoIA();
-  G.di++; MEMO={}; G.ultimo=rel; M=null;
+  if(G.gramadoRuim>0&&resU&&resU.casa===G.clubeId) G.gramadoRuim--;
+  G.di++; MEMO={}; G.ultimo=rel; M=null; sortearClima();
   if(G.di>=G.cal.length){ fimTemporada(); UI.tela="fim"; }
   else {
     UI.tela="jogo"; UI.aba="inicio";
     if(G.conf<15&&G.di>=8){ demitir(); }
-    else if(rnd()<.13) G.evento=ri(0,EVENTOS.length-1);
+    else if(rnd()<.3) G.evento=sortearEvento();
   }
   salvar(); render();
   if(G.di<G.cal.length&&UI.tela==="jogo"&&!G.demitido) mostrarRelatorio();
@@ -829,24 +850,101 @@ function mercadoIA(){
 }
 
 /* ---------- eventos de escolha ---------- */
+const MOR = (lista,v) => lista.forEach(p=>p.mor=clamp(p.mor+v,15,95));
+const CONF = v => { G.conf=clamp(G.conf+v,0,100); };
+const CX = () => G.cl[G.clubeId];
+const titulares = () => G.xi.filter(Boolean).map(id=>G.jog[id]).filter(Boolean);
+const craque = () => elenco(G.clubeId).sort((a,b)=>ovr(b)-ovr(a))[0];
+const jovem = () => elenco(G.clubeId).filter(p=>p.a<=21).sort((a,b)=>(b.pot-ovr(b))-(a.pot-ovr(a)))[0];
+const reserva = () => { const t=new Set(G.xi); return pick(elenco(G.clubeId).filter(p=>!t.has(p.id))); };
+const chance = (p,ok,nao) => rnd()<p?ok():nao();
+const CAT_EV={treino:"🏋️ Treino",vestiario:"🗣️ Vestiário",imprensa:"📰 Imprensa",torcida:"📣 Torcida",lesao:"🚑 Departamento médico",financeiro:"💰 Financeiro",mercado:"🔁 Mercado",base:"🌱 Base",diretoria:"🎩 Diretoria",estrutura:"🏗️ Estrutura"};
 const EVENTOS=[
- {t:"Um patrocinador quer um amistoso de marketing no meio da semana.",ops:[
-   {l:"Aceitar (caixa agora, elenco cansado)",f:()=>{ const v=Math.round(G.cl[G.clubeId].pat*1.5); G.cl[G.clubeId].cx+=v; elenco(G.clubeId).forEach(p=>p.cond=Math.max(40,p.cond-10)); return `Entraram ${din(v)}, mas o elenco chegou mais cansado (-10 de condição).`; }},
+ {cat:"financeiro",uma:1,t:"Um patrocinador quer um amistoso de marketing no meio da semana.",ops:[
+   {l:"Aceitar (caixa agora, elenco cansado)",f:()=>{ const v=Math.round(CX().pat*1.5); CX().cx+=v; elenco(G.clubeId).forEach(p=>p.cond=Math.max(40,p.cond-10)); return `Entraram ${din(v)}, mas o elenco chegou mais cansado (-10 de condição).`; }},
    {l:"Recusar e descansar o grupo",f:()=>{ elenco(G.clubeId).forEach(p=>p.cond=Math.min(100,p.cond+8)); return "O grupo agradeceu a folga (+8 de condição)."; }}]},
- {t:"A torcida organizada pede ingressos populares para o próximo jogo.",ops:[
-   {l:"Atender (custa uma bilheteria menor)",f:()=>{ const v=Math.round(G.cl[G.clubeId].pat*.6); G.cl[G.clubeId].cx-=v; G.conf=clamp(G.conf+6,0,100); return `Custou ${din(v)}, mas a diretoria gostou do clima (+6 de confiança).`; }},
-   {l:"Negar",f:()=>{ G.conf=clamp(G.conf-3,0,100); return "Protesto na porta do CT. A diretoria não gostou (-3 de confiança)."; }}]},
- {t:"A imprensa pergunta sobre a fase do time. O que você faz na coletiva?",ops:[
-   {l:"Bancar o elenco (seguro)",f:()=>{ elenco(G.clubeId).forEach(p=>p.mor=clamp(p.mor+5,15,95)); return "O vestiário se sentiu protegido (+5 de moral)."; }},
-   {l:"Cobrar publicamente — 50% funciona",f:()=>{ const ok=rnd()<.5; elenco(G.clubeId).forEach(p=>p.mor=clamp(p.mor+(ok?12:-10),15,95)); return ok?"O grupo respondeu à cobrança (+12 de moral).":"Pegou mal no vestiário (-10 de moral)."; }}]},
- {t:"Um olheiro garante ter achado uma joia de 17 anos no interior.",ops:[
-   {l:"Pagar pela indicação — 65% de vir uma promessa",f:()=>{ const c=G.cl[G.clubeId], v=Math.round(c.pat*2); if(c.cx<v) return "Sem caixa para bancar a indicação."; c.cx-=v; const ok=rnd()<.65, o=forca(G.clubeId)-(ok?ri(12,18):ri(22,30)); const p=novoJogador(G.clubeId,pick(POS.slice(1)),o,17,ok?clamp(Math.round(o)+ri(12,20),0,97):Math.round(o)+ri(1,4)); return `Custou ${din(v)}. ${p.n} (${melhorPos(p)}, ${ovr(p)}) chegou — ${ok?"e o potencial impressiona!":"mas parece só mais um."}`; }},
+ {cat:"torcida",t:"A torcida organizada pede ingressos populares para o próximo jogo.",ops:[
+   {l:"Atender (custa uma bilheteria menor)",f:()=>{ const v=Math.round(CX().pat*.6); CX().cx-=v; CONF(6); return `Custou ${din(v)}, mas a diretoria gostou do clima (+6 de confiança).`; }},
+   {l:"Negar",f:()=>{ CONF(-3); return "Protesto na porta do CT. A diretoria não gostou (-3 de confiança)."; }}]},
+ {cat:"imprensa",t:"A imprensa pergunta sobre a fase do time. O que você faz na coletiva?",ops:[
+   {l:"Bancar o elenco (seguro)",f:()=>{ MOR(elenco(G.clubeId),5); return "O vestiário se sentiu protegido (+5 de moral)."; }},
+   {l:"Cobrar publicamente — 50% funciona",f:()=>chance(.5,()=>{ MOR(elenco(G.clubeId),12); return "O grupo respondeu à cobrança (+12 de moral)."; },()=>{ MOR(elenco(G.clubeId),-10); return "Pegou mal no vestiário (-10 de moral)."; })}]},
+ {cat:"base",t:"Um olheiro garante ter achado uma joia de 17 anos no interior.",ops:[
+   {l:"Pagar pela indicação — 65% de vir uma promessa",f:()=>{ const c=CX(), v=Math.round(c.pat*2); if(c.cx<v) return "Sem caixa para bancar a indicação."; c.cx-=v; const ok=rnd()<.65, o=forca(G.clubeId)-(ok?ri(12,18):ri(22,30)); const p=novoJogador(G.clubeId,pick(POS.slice(1)),o,17,ok?clamp(Math.round(o)+ri(12,20),0,97):Math.round(o)+ri(1,4)); return `Custou ${din(v)}. ${p.n} (${melhorPos(p)}, ${ovr(p)}) chegou — ${ok?"e o potencial impressiona!":"mas parece só mais um."}`; }},
    {l:"Dispensar o olheiro",f:()=>"Vida que segue."}]},
- {t:"O presidente aparece no treino querendo palpitar na escalação.",ops:[
-   {l:"Ouvir com educação",f:()=>{ G.conf=clamp(G.conf+4,0,100); elenco(G.clubeId).forEach(p=>p.mor=clamp(p.mor-3,15,95)); return "Presidente feliz (+4 de confiança), vestiário nem tanto (-3 de moral)."; }},
-   {l:"Deixar claro quem manda no time",f:()=>{ G.conf=clamp(G.conf-4,0,100); elenco(G.clubeId).forEach(p=>p.mor=clamp(p.mor+5,15,95)); return "O grupo fechou com você (+5 de moral), o presidente saiu bufando (-4 de confiança)."; }}]},
+ {cat:"diretoria",t:"O presidente aparece no treino querendo palpitar na escalação.",ops:[
+   {l:"Ouvir com educação",f:()=>{ CONF(4); MOR(elenco(G.clubeId),-3); return "Presidente feliz (+4 de confiança), vestiário nem tanto (-3 de moral)."; }},
+   {l:"Deixar claro quem manda no time",f:()=>{ CONF(-4); MOR(elenco(G.clubeId),5); return "O grupo fechou com você (+5 de moral), o presidente saiu bufando (-4 de confiança)."; }}]},
+ {cat:"treino",t:"O preparador físico propõe uma semana de treino puxado.",ops:[
+   {l:"💪 Intensidade total — 60% de alguém evoluir",f:()=>{ elenco(G.clubeId).forEach(p=>p.cond=Math.max(40,p.cond-12)); return chance(.6,()=>{ const p=pick(titulares()); p.d++; return `${p.n} respondeu muito bem (+1 de overall). O resto do grupo sentiu (-12 de condição).`; },()=>"Ninguém evoluiu e o grupo chegou moído (-12 de condição)."); }},
+   {l:"🎯 Personalizado por grupo",f:()=>{ elenco(G.clubeId).forEach(p=>p.cond=Math.max(40,p.cond-4)); return "Cada um no seu ritmo. Desgaste pequeno (-4 de condição)."; }},
+   {l:"🛌 Folga total",f:()=>{ elenco(G.clubeId).forEach(p=>p.cond=Math.min(100,p.cond+12)); MOR(elenco(G.clubeId),2); return "Pernas descansadas (+12 de condição)."; }}]},
+ {cat:"treino",t:"Sua comissão estudou o próximo adversário. Qual o foco da semana?",cond:()=>!!meuJogo(),ops:[
+   {l:"🛡️ Neutralizar as jogadas deles",f:()=>{ G.foco="D"; return "Foco defensivo: sua defesa entra mais ligada no próximo jogo."; }},
+   {l:"⚔️ Explorar as fraquezas deles",f:()=>{ G.foco="A"; return "Foco ofensivo: seu ataque entra mais afiado no próximo jogo."; }},
+   {l:"😴 Treino leve",f:()=>{ elenco(G.clubeId).forEach(p=>p.cond=Math.min(100,p.cond+6)); return "Treino leve. O grupo recupera um pouco (+6 de condição)."; }}]},
+ {cat:"vestiario",t:"Briga no vestiário! Dois jogadores discutiram feio depois do treino.",ops:[
+   {l:"Multar os dois",f:()=>{ const a=pick(elenco(G.clubeId)), b=pick(elenco(G.clubeId)); MOR([a,b],-12); MOR(elenco(G.clubeId),3); return `${a.n} e ${b.n} foram multados (-12 de moral). O grupo entendeu o recado (+3).`; }},
+   {l:"Conversar em particular — 60% resolve",f:()=>chance(.6,()=>{ MOR(elenco(G.clubeId),4); return "Abraço no fim da conversa. Vestiário em paz (+4 de moral)."; },()=>{ MOR(elenco(G.clubeId),-6); return "A conversa não adiantou e o clima pesou (-6 de moral)."; })},
+   {l:"Fingir que não viu",f:()=>{ MOR(elenco(G.clubeId),-4); return "O assunto virou fofoca no grupo (-4 de moral)."; }}]},
+ {cat:"base",t:"Um garoto da base está arrebentando nos treinos.",cond:()=>!!jovem(),ops:[
+   {l:"Promover ao time titular",f:()=>{ const p=jovem(); p.mor=clamp(p.mor+15,15,95); if(rnd()<.5){ p.d++; return `${p.n} ganhou confiança e evoluiu (+1 de overall, +15 de moral). Escale ele!`; } return `${p.n} está empolgado (+15 de moral). Agora é com você escalar.`; }},
+   {l:"Segurar mais um pouco",f:()=>{ const p=jovem(); p.mor=clamp(p.mor-8,15,95); return `${p.n} ficou chateado (-8 de moral), mas segue treinando.`; }}]},
+ {cat:"vestiario",t:"O grupo está confiante demais depois da sequência boa.",cond:()=>(G.st||{}).seqV>=3,ops:[
+   {l:"Puxar o freio de mão",f:()=>{ MOR(elenco(G.clubeId),-3); G.foco="D"; return "Pés no chão. Um pouco menos de moral (-3), mais atenção atrás no próximo jogo."; }},
+   {l:"Deixar o embalo correr",f:()=>chance(.6,()=>{ MOR(elenco(G.clubeId),6); return "O time está voando (+6 de moral)."; },()=>{ MOR(elenco(G.clubeId),-6); return "Salto alto: o treino foi um desastre (-6 de moral)."; })}]},
+ {cat:"vestiario",t:"Moral em baixa. O capitão pede uma reunião com você.",cond:()=>{ const u=(G.st||{}).ult||[]; return u.slice(-3).filter(r=>r==="D").length>=2; },ops:[
+   {l:"Ouvir o grupo e mudar o ambiente",f:()=>{ MOR(elenco(G.clubeId),8); return "Os jogadores se sentiram ouvidos (+8 de moral)."; }},
+   {l:"Churrasco de integração (custa)",f:()=>{ const v=Math.round(CX().pat*.3); CX().cx-=v; MOR(elenco(G.clubeId),12); return `Custou ${din(v)}, mas o clima mudou da água pro vinho (+12 de moral).`; }},
+   {l:"Cobrar mais entrega",f:()=>chance(.4,()=>{ MOR(elenco(G.clubeId),10); return "O grupo reagiu à cobrança (+10 de moral)."; },()=>{ MOR(elenco(G.clubeId),-8); return "Cobrança na hora errada (-8 de moral)."; })}]},
+ {cat:"torcida",t:"Protesto da torcida na porta do CT depois da má fase.",cond:()=>G.conf<45,ops:[
+   {l:"Ir até lá e conversar",f:()=>chance(.55,()=>{ CONF(5); return "Você acalmou a torcida e ganhou pontos com a diretoria (+5 de confiança)."; },()=>{ CONF(-4); MOR(elenco(G.clubeId),-4); return "Virou bate-boca. Repercutiu mal (-4 de confiança, -4 de moral)."; })},
+   {l:"Treinar com portões fechados",f:()=>{ MOR(elenco(G.clubeId),3); CONF(-2); return "Elenco protegido (+3 de moral), mas a diretoria achou omissão (-2 de confiança)."; }}]},
+ {cat:"torcida",t:"A torcida prepara uma festa enorme para o próximo jogo em casa.",cond:()=>{ const j=meuJogo(); return j&&j.casa===G.clubeId; },ops:[
+   {l:"Convocar todo mundo pelas redes",f:()=>{ G.festa=true; return "Casa cheia garantida: o time entra embalado no próximo jogo."; }},
+   {l:"Pedir calma, jogo é jogo",f:()=>{ MOR(elenco(G.clubeId),2); return "Clima sereno no vestiário (+2 de moral)."; }}]},
+ {cat:"lesao",t:"Dúvida médica: um titular sente a coxa no último treino.",cond:()=>titulares().length>0,ops:[
+   {l:"Poupar no próximo jogo",f:()=>{ const p=pick(titulares()); p.les=1; return `${p.n} fica fora do próximo jogo, por precaução.`; }},
+   {l:"Infiltrar e jogar — 70% sem problema",f:()=>{ const p=pick(titulares()); return chance(.7,()=>`${p.n} vai pro jogo. Tudo certo por enquanto.`,()=>{ p.les=ri(3,5); return `Não deu: ${p.n} piorou e vai ficar ${p.les} jogos fora.`; }); }}]},
+ {cat:"lesao",t:"O departamento médico sugere tratamento intensivo para o elenco.",ops:[
+   {l:"Pagar o tratamento",f:()=>{ const v=Math.round(CX().pat*.8); CX().cx-=v; elenco(G.clubeId).forEach(p=>{ if(p.les>0) p.les=Math.max(0,p.les-2); p.cond=Math.min(100,p.cond+5); }); return `Custou ${din(v)}. Lesionados voltam mais cedo e o grupo recupera (+5 de condição).`; }},
+   {l:"Seguir o protocolo normal",f:()=>"Tudo como sempre."}]},
+ {cat:"financeiro",uma:1,t:"Uma empresa quer comprar os naming rights do estádio.",ops:[
+   {l:"Vender o nome (dinheiro grande)",f:()=>{ const v=Math.round(CX().pat*4); CX().cx+=v; CONF(3); return `${din(v)} no caixa. A torcida resmunga, mas a diretoria adorou (+3 de confiança).`; }},
+   {l:"Recusar: o nome é tradição",f:()=>{ MOR(elenco(G.clubeId),2); return "A torcida aplaudiu a decisão."; }}]},
+ {cat:"financeiro",uma:1,t:"Um novo patrocinador quer estampar a camisa.",ops:[
+   {l:"Contrato longo (patrocínio +8% por jogo)",f:()=>{ CX().pat=Math.round(CX().pat*1.08); return `Patrocínio por jogo agora é ${din(CX().pat)}.`; }},
+   {l:"Pagamento único",f:()=>{ const v=Math.round(CX().pat*4); CX().cx+=v; return `${din(v)} de uma vez no caixa.`; }}]},
+ {cat:"financeiro",t:"Multa da federação por atraso no início do último jogo.",ops:[
+   {l:"Pagar sem discutir",f:()=>{ const v=Math.round(CX().pat*.5); CX().cx-=v; return `Pago: ${din(v)}.`; }},
+   {l:"Recorrer — 50% de anular, senão paga em dobro",f:()=>{ const v=Math.round(CX().pat*.5); return chance(.5,()=>"Recurso aceito! Multa anulada.",()=>{ CX().cx-=v*2; return `Recurso negado. Saiu ${din(v*2)}.`; }); }}]},
+ {cat:"financeiro",t:"Despesa imprevista: o ônibus da delegação quebrou.",ops:[
+   {l:"Consertar agora",f:()=>{ const v=Math.round(CX().pat*.4); CX().cx-=v; return `Conserto pago: ${din(v)}.`; }},
+   {l:"Adiar — 50% de sair mais caro depois",f:()=>chance(.5,()=>"Deu sorte: o ônibus aguentou até o fim do mês.",()=>{ const v=Math.round(CX().pat*1.2); CX().cx-=v; elenco(G.clubeId).forEach(p=>p.cond=Math.max(40,p.cond-5)); return `Quebrou na estrada. Custou ${din(v)} e a viagem cansou o grupo (-5 de condição).`; })}]},
+ {cat:"mercado",uma:1,t:"Um clube grande fez proposta direta pelo seu craque.",cond:()=>G.el[G.clubeId].length>14,ops:[
+   {l:"Vender (bem acima do valor)",f:()=>{ const p=craque(), comprador=Object.keys(G.cl).filter(id=>id!==G.clubeId&&tier(G.div[id])>=tier(G.div[G.clubeId])).sort((a,b)=>forca(b)-forca(a))[ri(0,4)]||Object.keys(G.cl).find(id=>id!==G.clubeId), v=Math.round(valor(p)*1.6/1000)*1000; CX().cx+=v; G.fin.transf+=v; noticia(`🤝 ${p.n} vendido ao ${CL[comprador].n} por ${din(v)}.`); transferir(p.id,comprador); MOR(elenco(G.clubeId),-4); return `${p.n} foi vendido por ${din(v)}. O grupo sentiu a perda (-4 de moral).`; }},
+   {l:"Recusar e segurar o craque",f:()=>{ const p=craque(); p.mor=clamp(p.mor-10,15,95); CONF(2); return `${p.n} ficou chateado com a recusa (-10 de moral), mas a torcida comemorou.`; }}]},
+ {cat:"mercado",t:"Seu craque quer um contrato de imagem e ameaça forçar a saída.",ops:[
+   {l:"Pagar o contrato de imagem",f:()=>{ const p=craque(), v=salario(p)*10; CX().cx-=v; p.mor=95; return `${p.n} assinou feliz da vida (custou ${din(v)}).`; }},
+   {l:"Não ceder",f:()=>{ const p=craque(); p.mor=clamp(p.mor-15,15,95); G.venda[p.id]=1; return `${p.n} ficou irritado (-15 de moral) e foi parar na lista de venda.`; }}]},
+ {cat:"vestiario",t:"Um reserva reclama publicamente da falta de chances.",cond:()=>!!reserva(),ops:[
+   {l:"Prometer minutos",f:()=>{ const p=reserva(); p.mor=clamp(p.mor+12,15,95); return `${p.n} se acalmou (+12 de moral). Agora cumpra a promessa.`; }},
+   {l:"Botar à venda",f:()=>{ const p=reserva(); G.venda[p.id]=1; MOR(elenco(G.clubeId),-2); return `${p.n} foi para a lista de venda. O grupo achou duro (-2 de moral).`; }}]},
+ {cat:"estrutura",t:"O gramado precisa de reparo urgente.",ops:[
+   {l:"Reformar agora",f:()=>{ const v=Math.round(CX().pat*.7); CX().cx-=v; return `Reforma feita: ${din(v)}. Gramado nota 10.`; }},
+   {l:"Jogar assim mesmo — risco de lesão",f:()=>{ G.gramadoRuim=3; return "Pelos próximos 3 jogos, o risco de lesão em casa aumenta."; }}]},
+ {cat:"diretoria",uma:1,t:"Um investidor quer colocar dinheiro no clube, mas quer voz no futebol.",ops:[
+   {l:"Aceitar o investimento",f:()=>{ const v=Math.round(CX().pat*5); CX().cx+=v; CONF(-6); return `${din(v)} no caixa. Mas agora tem mais um cobrando resultado (-6 de confiança).`; }},
+   {l:"Recusar",f:()=>{ CONF(2); return "A diretoria gostou da independência (+2 de confiança)."; }}]},
+ {cat:"diretoria",uma:1,t:"O presidente libera uma verba extra depois da boa fase.",cond:()=>G.conf>=70,ops:[
+   {l:"Usar em reforços",f:()=>{ const v=Math.round(CX().pat*3); CX().cx+=v; return `${din(v)} liberados para o mercado.`; }},
+   {l:"Usar na estrutura (CT +1)",f:()=>{ const c=CX(); if(c.ct>=5) return "O CT já está no máximo. A verba voltou pro cofre."; c.ct++; return `CT subiu para o nível ${c.ct}.`; }}]},
+ {cat:"imprensa",t:"Um jornalista critica sua escalação no programa de maior audiência.",ops:[
+   {l:"Responder ao vivo — 50%",f:()=>chance(.5,()=>{ CONF(4); MOR(elenco(G.clubeId),3); return "Resposta afiada! A torcida comprou sua briga (+4 de confiança, +3 de moral)."; },()=>{ CONF(-5); return "Pegou mal. Virou meme (-5 de confiança)."; })},
+   {l:"Ignorar",f:()=>"O assunto morreu em dois dias."}]},
 ];
-function escolherEvento(i){ const txt=EVENTOS[G.evento].ops[i].f(); G.evento=null; MEMO={}; salvar(); render(); modal(`<h3>Resultado</h3><p>${esc(txt)}</p><button class="pri" onclick="fecharModal()">Ok</button>`); }
+function sortearEvento(){ const usados=G.evUsados||[]; const ok=EVENTOS.map((e,i)=>i).filter(i=>(!EVENTOS[i].uma||!usados.includes(i))&&(!EVENTOS[i].cond||EVENTOS[i].cond())); return ok.length?pick(ok):null; }
+function escolherEvento(i){ (G.evUsados=G.evUsados||[]).push(G.evento); const txt=EVENTOS[G.evento].ops[i].f(); G.evento=null; MEMO={}; salvar(); render(); modal(`<h3>Resultado</h3><p>${esc(txt)}</p><button class="pri" onclick="fecharModal()">Ok</button>`); }
 
 /* ---------- demissão, propostas, fim de temporada ---------- */
 const exigencia = cid => tier(G.div[cid])*18+(forca(cid)-80)*2;
@@ -996,16 +1094,25 @@ function abaInicio(){
     const casa=j.casa===G.clubeId, adv=casa?j.fora:j.casa, ok=escalacaoOk();
     prox=`<div class="card"><h3>Próximo jogo · ${dataLabel(d)}</h3><div class="placar"><div class="tm">${crest(j.casa,52)}<div class="trunc">${esc(CL[j.casa].c)}</div><div class="mut" style="font-size:12px">força ${Math.round(forca(j.casa))}</div></div><div class="cond mut" style="font-size:24px">×</div><div class="tm">${crest(j.fora,52)}<div class="trunc">${esc(CL[j.fora].c)}</div><div class="mut" style="font-size:12px">força ${Math.round(forca(j.fora))}</div></div></div>
     <div class="mut center" style="margin:8px 0;font-size:13px">${j.comp==="P"?"Campo neutro · vale vaga no Brasileirão":(casa?"🏠 Em casa · ":"✈️ Fora · ")+esc(CL[j.casa].est)}</div>
+    ${previaJogo(j)}
     ${ok?"":`<div class="neg center" style="margin-bottom:8px">⚠️ Escalação incompleta ou com jogador indisponível.</div>`}
     <div class="row"><button class="pri grow" onclick="jogar(false)">▶ Jogar</button><button class="grow" onclick="jogar(true)">⏩ Simular</button></div></div>`;
   } else prox=`<div class="card"><h3>${dataLabel(d)}</h3><p class="mut">Seu clube não joga nesta data.</p><button class="pri" style="width:100%" onclick="fecharData(null)">Avançar ▶</button></div>`;
-  const ev=G.evento!==null&&G.evento!==undefined?`<div class="card" style="border-color:var(--ac)"><h3>⚡ Decisão</h3><p>${EVENTOS[G.evento].t}</p>${EVENTOS[G.evento].ops.map((o,i)=>`<button style="width:100%;margin-bottom:6px;text-transform:none" onclick="escolherEvento(${i})">${o.l}</button>`).join("")}</div>`:"";
+  const ev=G.evento!==null&&G.evento!==undefined?`<div class="card" style="border-color:var(--ac)"><h3>⚡ ${CAT_EV[EVENTOS[G.evento].cat]||"Decisão"}</h3><p>${EVENTOS[G.evento].t}</p>${EVENTOS[G.evento].ops.map((o,i)=>`<button style="width:100%;margin-bottom:6px;text-transform:none" onclick="escolherEvento(${i})">${o.l}</button>`).join("")}</div>`:"";
   const of=G.ofertas.length?`<div class="card" style="border-color:var(--ok)"><div class="row"><div class="grow">💰 Você tem <b>${G.ofertas.length}</b> proposta(s) por jogadores.</div><button class="sm" onclick="UI.mercAba='vender';irAba('mercado')">Ver</button></div></div>`:"";
   const ini=clamp(pos-3,0,7), mini=cl.slice(ini,ini+5).map((x,i)=>linhaTabela(x,ini+i,dv)).join("");
   return `${ev}${prox}${of}
   <div class="card"><h3>Diretoria</h3><div class="row" style="margin-bottom:6px"><span style="font-size:24px">${PERFIS[presDe(G.clubeId).perfil].e}</span><div class="grow"><b>${esc(presDe(G.clubeId).n)}</b><div class="mut" style="font-size:12px">Presidente · ${presDe(G.clubeId).perfil}</div></div><button class="sm" onclick="abrirConversa()">💬 Reunião (${2-(G.reunioes||0)})</button></div><div class="kv"><span>${iconeObjetivo()} Objetivo</span><b>${G.obj.txt}</b></div>${diretrizes().map(d=>`<div class="kv" style="font-size:13px"><span class="mut">${d.ic} ${esc(d.txt)}</span><b class="${d.ok()?"pos":"mut"}">${d.ok()?"✓":"…"}</b></div>`).join("")}<div class="kv"><span>Posição atual</span><b>${cl[pos-1].j?pos+"º":"—"}</b></div><div style="margin-top:8px" class="row"><span class="mut">Confiança</span><div class="bar grow"><i style="width:${G.conf}%;background:${G.conf<25?"var(--bad)":G.conf<50?"var(--ac)":"var(--ok)"}"></i></div><b>${Math.round(G.conf)}</b></div>${G.conf<25?`<div class="neg" style="margin-top:6px;font-size:13px">A diretoria está perdendo a paciência.</div>`:""}</div>
   <div class="card"><h3>${DIV_NOME[dv]}</h3><table>${CAB_TAB}${mini}</table><button class="sm" style="margin-top:8px" onclick="irAba('mundo')">Tabela completa</button></div>
   <div class="card"><h3>Notícias</h3>${G.news.slice(0,7).map(n=>`<div style="padding:4px 0;border-bottom:1px solid var(--lin);font-size:14px">${esc(n.t)}</div>`).join("")||`<span class="mut">Nada por enquanto.</span>`}</div>`;
+}
+function previaJogo(j){
+  const c=climaAtual(), eu=setoresClube(G.clubeId), adv=setoresClube(j.casa===G.clubeId?j.fora:j.casa);
+  const lin=(k,l)=>`<div class="row" style="font-size:13px"><span style="width:58px" class="mut">${l}</span><b style="width:26px">${Math.round(eu[k])}</b><div class="bar grow"><i style="width:${clamp(50+(eu[k]-adv[k])*5,5,95)}%;background:${eu[k]>=adv[k]?"var(--ok)":"var(--bad)"}"></i></div><b style="width:26px" class="right">${Math.round(adv[k])}</b></div>`;
+  return `<div class="card" style="background:var(--card2);margin:0 0 10px"><div class="row" style="margin-bottom:6px"><span style="font-size:26px">${c.e}</span><div class="grow"><b>${c.n}</b><div class="mut" style="font-size:12px">${c.txt} ${efeitosClima(c)!=="sem efeito"?"("+efeitosClima(c)+")":""}</div></div></div>
+  ${lin("a","Ataque")}${lin("m","Meio")}${lin("d","Defesa")}
+  <div class="row" style="margin-top:8px;gap:6px">${[["D","🛡️ Retranca"],["N","⚖️ Equilíbrio"],["O","⚔️ Ofensiva"]].map(([k,l])=>`<span class="chip ${G.ment===k?"on":""}" style="flex:1;text-align:center;font-size:13px" onclick="G.ment='${k}';salvar();render()">${l}</span>`).join("")}</div>
+  ${G.foco?`<div class="mut" style="font-size:12px;margin-top:6px">🎯 Treino focado ${G.foco==="A"?"no ataque":"na defesa"} vale para este jogo.</div>`:""}${G.festa&&j.casa===G.clubeId?`<div class="mut" style="font-size:12px">🎉 Festa da torcida: o time entra embalado.</div>`:""}</div>`;
 }
 function mostrarRelatorio(){
   const r=G.ultimo; if(!r) return;
@@ -1147,7 +1254,7 @@ function jogar(simular){
 }
 function telaPartida(){
   const j=M.j, d=G.cal[G.di];
-  return `<div class="card"><div class="mut center" style="font-size:13px">${dataLabel(d)} · ${esc(M.neutro?"Campo neutro":CL[j.casa].est)}</div>
+  return `<div class="card"><div class="mut center" style="font-size:13px">${dataLabel(d)} · ${esc(M.neutro?"Campo neutro":CL[j.casa].est)} · ${climaAtual().e} ${climaAtual().n}</div>
   <div class="placar" style="margin-top:8px"><div class="tm">${crest(j.casa,48)}<div class="trunc">${esc(CL[j.casa].c)}</div></div><div class="gl" id="pl">0 - 0</div><div class="tm">${crest(j.fora,48)}<div class="trunc">${esc(CL[j.fora].c)}</div></div></div>
   <div id="relogio">0'</div><div id="stats" class="mut center" style="font-size:13px"></div></div>
   <div class="card" id="ctrl"><div class="row" style="flex-wrap:wrap"><button class="pri grow" id="btnPausa" onclick="pausarOuSeguir()">▶ Começar</button><button class="sm" onclick="velocidade()" id="btnVel">1x</button><button class="sm" onclick="irAoFim()">⏭ Fim</button></div>
