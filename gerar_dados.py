@@ -3,7 +3,7 @@
 
 Uso: python gerar_dados.py   (lê ../FenomenoDOBR, escreve dados.json nesta pasta)
 """
-import io, json, os
+import csv, io, json, os, re, unicodedata
 
 FONTE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "FenomenoDOBR")
 
@@ -25,6 +25,25 @@ POS_DUGOUT = {"GK": "GOL", "DC": "ZAG", "Lateral": "LAT", "MC": "MC", "Meia-Late
 PENALIDADE_COMPETENT = 3
 
 
+# presidentes = managers reais de cada clube no Dugout (presidentes.csv, exportado pelo usuário)
+APELIDOS = {"borussiamontecheidegado": "borussiamontecheiodegado"}
+
+
+def chave(nome):
+    nome = re.sub(r"\s*\([^)]*\)\s*$", "", nome.strip())
+    nome = unicodedata.normalize("NFKD", nome).encode("ascii", "ignore").decode().lower()
+    nome = re.sub(r"[^a-z0-9]", "", nome)
+    return APELIDOS.get(nome, nome)
+
+
+def ler_presidentes():
+    caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)), "presidentes.csv")
+    if not os.path.exists(caminho):
+        return {}
+    with io.open(caminho, encoding="utf-8-sig") as f:
+        return {chave(r["nomeClube"]): r["nomeManager"].strip() for r in csv.DictReader(f, delimiter=";")}
+
+
 def ovr_de_ops(ops):
     return max(25, min(99, round(50 + (ops - 150) * 0.47)))
 
@@ -39,6 +58,7 @@ def main():
     idade = {j["id"]: j["idade"] for j in ler("dados_fenomeno_raridade.json")["jogadores"]}
     info = {c["id_time"]: c for c in ler("clubes_info.json")}
 
+    presidentes = ler_presidentes()
     clubes = []
     for t in completo["times"]:
         nome_div = t["divisao"].split(" - ")[1]
@@ -48,6 +68,7 @@ def main():
             "id": t["id"], "n": t["nome"], "c": c.get("nome_curto") or t["nome"], "div": div,
             "est": c.get("estadio_nome") or "Estádio Municipal",
             "cap": int(c.get("estadio_capacidade_atual") or 20000),
+            "pres": presidentes.get(chave(t["nome"])),
         })
 
     jogadores = []
@@ -66,7 +87,7 @@ def main():
     saida = {"atributos": ATRIBUTOS, "clubes": clubes, "jogadores": jogadores}
     with io.open("dados.json", "w", encoding="utf-8") as f:
         json.dump(saida, f, ensure_ascii=False, separators=(",", ":"))
-    print(len(clubes), "clubes,", len(jogadores), "jogadores ->", os.path.getsize("dados.json") // 1024, "KB")
+    print(len(clubes), "clubes,", len(jogadores), "jogadores,", sum(1 for c in clubes if c["pres"]), "presidentes ->", os.path.getsize("dados.json") // 1024, "KB")
 
 
 if __name__ == "__main__":

@@ -455,6 +455,7 @@ const PERFIS={
 function presDe(cid){
   const c=G.cl[cid];
   if(!c.pres){ let h=0; for(const ch of String(cid)) h=(h*31+ch.charCodeAt(0))>>>0; c.pres={n:NOMES_PRES[h%NOMES_PRES.length],perfil:Object.keys(PERFIS)[(h>>5)%5]}; }
+  if(CL[cid]&&CL[cid].pres) c.pres.n=CL[cid].pres; // manager real do clube no Dugout
   return c.pres;
 }
 const perfilAtual = () => PERFIS[presDe(G.clubeId).perfil];
@@ -478,7 +479,7 @@ function nivelEstrutura(){ const c=G.cl[G.clubeId]; return c.ct+c.base+c.dm+c.ca
 function iconeObjetivo(){ const tx=G.obj.txt; return /título/.test(tx)?"🏆":/acesso/.test(tx)?"⬆️":/top 5/.test(tx)?"📈":/rebaix|últimas/.test(tx)?"🛟":"⚖️"; }
 function telaReuniao(){
   const pr=presDe(G.clubeId), pf=PERFIS[pr.perfil], novo=G.reuniaoNova;
-  return `<div class="pres"><div class="av">${pf.e}</div><div class="rot">${novo?"REUNIÃO INICIAL":"NOVA TEMPORADA"} · PRESIDENTE</div><h2 style="margin-top:4px">${esc(pr.n)}</h2><div style="opacity:.85">${pr.perfil} · ${esc(CL[G.clubeId].n)}</div></div>
+  return `<div class="pres"><div class="av">${pf.e}</div><div class="rot">${novo?"REUNIÃO INICIAL":"NOVA TEMPORADA"} · PRESIDENTE</div><h2 style="margin-top:4px;text-transform:none">${esc(pr.n)}</h2><div style="opacity:.85">${pr.perfil} · ${esc(CL[G.clubeId].n)}</div></div>
   <div class="card discurso"><div class="mut" style="font-size:12px;font-style:normal;letter-spacing:.08em">DISCURSO DE ABERTURA</div>“${esc(pick(pf.fala))}”</div>
   <h3>Missão da temporada ${G.ano}</h3>
   <div class="card missao"><div class="ic">${iconeObjetivo()}</div><div><b style="font-size:18px">${G.obj.txt}</b><div class="pos" style="font-size:14px;font-weight:600">Meta: ${G.obj.alvo}º lugar ou melhor</div><div class="mut" style="font-size:13px">${esc(pf.desc)}</div></div></div>
