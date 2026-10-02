@@ -67,6 +67,16 @@ tr.z1 td:first-child{box-shadow:inset 3px 0 var(--ok)}tr.z2 td:first-child{box-s
 #feed{max-height:230px;overflow:auto}
 #feed div{padding:5px 0;border-bottom:1px solid var(--lin);font-size:14px}
 #feed .gol{color:var(--ac);font-weight:600}
+.lance-t{font-family:"Barlow Condensed",sans-serif;font-weight:800;font-size:26px;text-align:center;color:var(--ac)}
+.op{display:block;width:100%;text-align:left;text-transform:none;margin-bottom:8px;padding:10px 12px}
+.op small{display:block;font-family:Barlow,sans-serif;font-weight:500;font-size:13px;color:var(--mut);letter-spacing:0}
+.op .pct{float:right;color:var(--ac)}
+.gol-box{position:relative;margin:10px auto 0;max-width:420px;aspect-ratio:2.4/1;border:7px solid #f2f2f2;border-bottom:0;border-radius:4px 4px 0 0;background:repeating-linear-gradient(0deg,rgba(255,255,255,.07) 0 1px,transparent 1px 14px),repeating-linear-gradient(90deg,rgba(255,255,255,.07) 0 1px,transparent 1px 14px),#12233c;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr)}
+.gol-box button{background:transparent;border:1px dashed rgba(255,255,255,.12);border-radius:0;font-size:22px;color:rgba(255,255,255,.55);padding:0}
+.gol-box button:hover:not(:disabled){background:rgba(255,210,63,.18);color:#fff}
+.gol-box button:disabled{opacity:1;cursor:default}
+.gramado{max-width:420px;margin:0 auto 10px;height:26px;background:#1d6b3a;border-top:3px solid #fff}
+.res-gol{font-family:"Barlow Condensed",sans-serif;font-weight:800;font-size:28px;text-align:center}
 .heroi{text-align:center;padding:26px 8px}
 .heroi h1{font-size:44px;line-height:1}
 .est{height:120px;border-radius:10px;background:#0d1729 center/cover no-repeat;margin-bottom:8px}
@@ -133,8 +143,8 @@ function poisson(l){ const L=Math.exp(-l); let k=0,p=1; do{ k++; p*=rnd(); }whil
 function sortearPeso(itens, pesoFn){ let tot=0; const ps=itens.map(x=>{ const w=Math.max(0,pesoFn(x)); tot+=w; return w; }); if(tot<=0) return itens.length?pick(itens):null; let r=rnd()*tot; for(let i=0;i<itens.length;i++){ r-=ps[i]; if(r<=0) return itens[i]; } return itens[itens.length-1]; }
 function din(v){ const s=v<0?"-":""; v=Math.abs(v); if(v>=1e6) return s+"R$ "+(v/1e6).toFixed(v>=1e7?1:2).replace(".",",")+" mi"; if(v>=1e3) return s+"R$ "+Math.round(v/1e3)+" mil"; return s+"R$ "+Math.round(v); }
 function toast(t){ const e=document.getElementById("toast"); e.textContent=t; e.style.display="block"; clearTimeout(toast.t); toast.t=setTimeout(()=>e.style.display="none",2600); }
-function modal(html){ document.getElementById("modalcx").innerHTML=html; document.getElementById("modal").classList.add("on"); }
-function fecharModal(){ document.getElementById("modal").classList.remove("on"); }
+function modal(html,fixo){ UI.modalFixo=!!fixo; document.getElementById("modalcx").innerHTML=html; document.getElementById("modal").classList.add("on"); }
+function fecharModal(){ UI.modalFixo=false; document.getElementById("modal").classList.remove("on"); }
 function corDoId(id){ let h=0; for(const c of String(id)) h=(h*31+c.charCodeAt(0))%360; return `hsl(${h},55%,38%)`; }
 function crestFalhou(img,id,tam){ const s=document.createElement("span"); s.className="badge"; s.style.cssText=`width:${tam}px;height:${tam}px;background:${corDoId(id)};font-size:${Math.round(tam*.4)}px`; s.textContent=(CL[id]?CL[id].n:"?").split(/\s+/).map(w=>w[0]).join("").slice(0,2).toUpperCase(); img.replaceWith(s); }
 function crest(id,tam=28){ return `<img class="crest" width="${tam}" height="${tam}" loading="lazy" src="${ASSET}crests/${id}.png" onerror="crestFalhou(this,'${id}',${tam})" alt="">`; }
@@ -319,7 +329,7 @@ function criarPartida(j){
     return {id:cid,user,ment:user?G.ment:"N",subs:0,fin:0,posse:0,entraram:new Set(xi.map(x=>x.pid)),
       jog:xi.map(s=>({pid:s.pid,pos:s.pos,cond:user?G.jog[s.pid].cond:100,nota:6.2+rnd()*.6,am:0,out:false,les:false,g:0,as:0}))};
   };
-  M={j,min:0,fase:"1T",lados:[lado(j.casa),lado(j.fora)],gols:[0,0],ev:[],neutro:j.comp==="P",vac:null,pen:null,fim:false,pausa:true,vel:1,timer:null,todos:[]};
+  M={j,min:0,fase:"1T",lados:[lado(j.casa),lado(j.fora)],gols:[0,0],ev:[],neutro:j.comp==="P",vac:null,pen:null,fim:false,pausa:true,vel:1,timer:null,todos:[],interativo:false,lances:0,decisao:null};
   M.lados.forEach(L=>L.jog.forEach(x=>M.todos.push(x)));
   evento(0,-1,"info",`Bola rolando no ${M.neutro?"campo neutro":CL[j.casa].est}!`);
 }
@@ -335,9 +345,12 @@ function tickPartida(){
   const lam=[la,lb], peso=M.min>=89?2:1; // gol no fim é comum no Dugout
   for(let i=0;i<2;i++){
     const L=M.lados[i], at=ativos(L); if(!at.length) continue;
+    const podeDecidir=M.interativo&&M.min<89&&M.min!==45;
+    if(rnd()<.0014){ L.fin++; if(podeDecidir){ abrirPenalti(i); return; } penaltiAuto(i); continue; }
     if(rnd()<clamp(lam[i]/90/CONV*peso,0,.9)){
       L.fin++;
       const s=sortearPeso(at,x=>PESO_GOL[x.pos]*Math.pow(ovrEm(G.jog[x.pid],x.pos)/80,3)+.05);
+      if(L.user&&podeDecidir&&s.pos!=="GOL"&&M.lances<4&&rnd()<.4){ abrirLance(i,s); return; }
       if(rnd()<CONV){
         M.gols[i]++; s.g++; s.nota+=.9;
         let txt=pick(TXT_GOL).replace("{j}",nomeJ(s));
@@ -372,13 +385,161 @@ function subsIA(L,i){
     if(cand&&ovrEm(cand,x.pos)>=ovrEm(G.jog[x.pid],x.pos)-6){ const novo={pid:cand.id,pos:x.pos,cond:100,nota:6.3,am:0,out:false,les:false,g:0,as:0}; L.jog[L.jog.indexOf(x)]=novo; M.todos.push(novo); L.entraram.add(cand.id); L.subs++; evento(M.min,i,"sub",`🔁 ${CL[L.id].c}: sai ${nomeJ(x)}, entra ${cand.n}.`); }
   });
 }
-function encerrarPartida(){
-  const j=M.j, r=Object.assign({},j,{gc:M.gols[0],gf:M.gols[1],pen:null});
-  if(j.comp!=="L"&&r.gc===r.gf){
-    const S=M.lados.map(setoresLado);
-    r.pen=penaltisRapido(clamp(.74+(S[0].a-S[1].d)/200,.55,.9),clamp(.74+(S[1].a-S[0].d)/200,.55,.9)); M.pen=r.pen;
-    evento(90,-1,"info",`🥅 Pênaltis: ${CL[j.casa].c} ${r.pen.c} x ${r.pen.f} ${CL[j.fora].c}`);
+/* ---------- lances interativos e pênaltis ---------- */
+// atributo do Dugout normalizado 0-1 (jogador gerado usa o overall como aproximação)
+function atr(p,nome){ const a=AT[p.id]; if(a) return clamp(a[D.atributos.indexOf(nome)]/50,0,1); return clamp((ovr(p)-45)/50,0,1); }
+function goleiroDe(i){ const g=ativos(M.lados[i]).find(x=>x.pos==="GOL"); return g?clamp((ovrEm(G.jog[g.pid],"GOL")-60)/35,0,1):0; }
+const melhorEm=(i,nome,semGol)=>ativos(M.lados[i]).filter(x=>!semGol||x.pos!=="GOL").sort((a,b)=>atr(G.jog[b.pid],nome)-atr(G.jog[a.pid],nome))[0];
+const finalizadorDe=(i,exceto)=>sortearPeso(ativos(M.lados[i]).filter(x=>x!==exceto&&x.pos!=="GOL"),x=>PESO_GOL[x.pos]+.1);
+const LANCES={
+  cara:{t:"🥅 CARA A CARA!",d:"{j} fica de frente pro goleiro!",ops:[
+    {l:"🎯 Chute colocado",d:"No cantinho, longe do goleiro.",p:(p,g)=>.36+.22*atr(p,"Shooting")-.14*g},
+    {l:"🪄 Driblar o goleiro",d:"Tira o goleiro da jogada.",p:(p,g)=>.26+.32*atr(p,"Dribbling")-.1*g},
+    {l:"🥄 Cavadinha",d:"Por cima do goleiro. Puro estilo.",p:(p,g)=>.2+.3*atr(p,"First touch")-.06*g,estilo:1}]},
+  contra:{t:"🏃 CONTRA-ATAQUE!",d:"{j} puxa o contra-ataque com campo pela frente.",ops:[
+    {l:"⚡ Acelerar sozinho",d:"Corre pro gol antes da zaga voltar.",p:(p,g)=>.14+.2*atr(p,"Speed")-.06*g},
+    {l:"🤝 Tocar pro companheiro",d:"Divide com quem chega livre.",p:(p,g)=>.2-.05*g,outro:1},
+    {l:"⏸ Segurar e esperar apoio",d:"Mais seguro, bem menos perigoso.",p:()=>.07}]},
+  falta:{t:"🎯 FALTA PERIGOSA!",d:"Falta na entrada da área. {j} ajeita a bola.",ops:[
+    {l:"🎯 No ângulo",d:"Colocada, por cima da barreira.",p:(p,g)=>.07+.2*atr(p,"Long shots")-.05*g},
+    {l:"💣 Pancada",d:"Força bruta, no meio do gol.",p:p=>.07+.12*atr(p,"Shooting")},
+    {l:"🧠 Jogada ensaiada",d:"Rola pro lado e alguém finaliza.",p:(p,g)=>.13-.03*g,outro:1}]},
+  escanteio:{t:"🚩 ESCANTEIO!",d:"{j} vai cobrar o escanteio.",ops:[
+    {l:"🗼 Cabeçada firme",d:"Na cabeça do melhor cabeceador.",p:(p,g,i)=>.05+.12*atr(p,"Crossing")+.12*atr(G.jog[melhorEm(i,"Heading",1).pid],"Heading")-.04*g,cabeca:1},
+    {l:"⚡ Rasteiro na primeira trave",d:"Desvio rápido de quem chega.",p:()=>.1,outro:1},
+    {l:"🧠 Jogada ensaiada",d:"Recua curto e cria o espaço.",p:()=>.11,outro:1}]},
+  lateral:{t:"↗️ ATAQUE PELA LATERAL!",d:"{j} avança pela lateral com a bola dominada.",ops:[
+    {l:"⚡ Cruzar rasteiro",d:"Bola na medida pra área.",p:p=>.08+.16*atr(p,"Crossing"),outro:1},
+    {l:"✂️ Cortar pro meio",d:"Puxa pro pé bom e finaliza.",p:(p,g)=>.08+.16*atr(p,"Dribbling")-.05*g},
+    {l:"🏃 Ir à linha de fundo",d:"Vai até o fundo pra cruzar melhor.",p:p=>.05+.2*atr(p,"Speed"),outro:1}]},
+  sobra:{t:"💥 SOBROU NA ENTRADA!",d:"A bola sobra para {j} na entrada da área.",ops:[
+    {l:"💥 Chute de primeira",d:"Bate antes da marcação chegar.",p:(p,g)=>.08+.2*atr(p,"Long shots")-.05*g},
+    {l:"🦶 Dominar e ajeitar",d:"Mais controle, mas a zaga pode fechar.",p:(p,g)=>.11+.12*atr(p,"First touch")-.05*g}]},
+  chance:{t:"⚡ CHANCE!",d:"{j} recebe livre na área!",ops:[
+    {l:"🎯 Bater de primeira",d:"Sem pensar, na bochecha da rede.",p:(p,g)=>.2+.2*atr(p,"Shooting")-.1*g},
+    {l:"🦶 Dominar antes",d:"Ajeita pro pé bom.",p:(p,g)=>.16+.2*atr(p,"First touch")-.08*g}]},
+};
+const TIPO_POR_POS={ATA:[["cara",4],["chance",3],["contra",2],["sobra",2]],MC:[["sobra",4],["falta",3],["contra",2],["chance",1]],ML:[["lateral",6],["escanteio",3],["sobra",1]],LAT:[["lateral",6],["escanteio",4]],ZAG:[["escanteio",7],["falta",3]]};
+function abrirLance(i,s){
+  const tipo=sortearPeso(TIPO_POR_POS[s.pos],x=>x[1])[0], L=LANCES[tipo];
+  let autor=s; if(tipo==="escanteio") autor=melhorEm(i,"Crossing",1)||s;
+  const g=goleiroDe(1-i), p=G.jog[autor.pid];
+  M.lances++; M.pausa=true; clearTimeout(M.timer);
+  M.decisao={tipo:"lance",i,autor,lance:tipo,ops:L.ops.map(o=>clamp(o.p(p,g,i),.03,.85))};
+  modal(`<div class="lance-t">${L.t}</div><p class="center">${esc(L.d.replace("{j}",p.n))} <span class="mut">(${M.min}')</span></p>
+  ${L.ops.map((o,k)=>`<button class="op" onclick="decidirLance(${k})"><span class="pct">${Math.round(M.decisao.ops[k]*100)}%</span>${o.l}<small>${o.d}</small></button>`).join("")}
+  <div class="mut center" style="font-size:12px">% = chance de gol</div>`,true);
+  atualizarPartida();
+}
+function decidirLance(k){
+  const dc=M.decisao, o=LANCES[dc.lance].ops[k], i=dc.i;
+  let fin=dc.autor, ass=null;
+  if(o.cabeca){ fin=melhorEm(i,"Heading",1)||fin; ass=dc.autor; }
+  else if(o.outro){ const f=finalizadorDe(i,dc.autor); if(f){ fin=f; ass=dc.autor; } }
+  if(fin===ass) ass=null;
+  const gol=rnd()<dc.ops[k];
+  let txt;
+  if(gol){
+    M.gols[i]++; fin.g++; fin.nota+=.9+(o.estilo?.3:0); if(ass){ ass.as++; ass.nota+=.5; }
+    txt=`⚽ GOL! ${nomeJ(fin)}${o.estilo?" de cavadinha, que golaço!":" não perdoa!"}${ass?` (assist. ${nomeJ(ass)})`:""}`;
+    evento(M.min,i,"gol",txt); ativos(M.lados[1-i]).forEach(x=>{ if(x.pos==="GOL"||x.pos==="ZAG"||x.pos==="LAT") x.nota-=.2; });
+  } else {
+    txt=o.estilo?`A cavadinha de ${nomeJ(fin)} morre nas mãos do goleiro.`:pick([`O goleiro faz grande defesa na finalização de ${nomeJ(fin)}!`,`${nomeJ(fin)} manda por cima!`,`A zaga corta na hora H, ${nomeJ(fin)} não consegue finalizar.`,`Na trave! ${nomeJ(fin)} quase marca.`]);
+    evento(M.min,i,"chance",txt); fin.nota+=.05;
   }
+  mostrarResultadoDecisao(gol,txt);
+}
+function mostrarResultadoDecisao(gol,txt,extra,titulo){
+  modal(`${extra||""}<div class="res-gol ${gol?"ac":"mut"}">${titulo||(gol?"GOOOL!":"Não foi dessa vez")}</div><p class="center">${esc(txt)}</p><button class="pri" style="width:100%" onclick="seguirDecisao()">Continuar →</button>`,true);
+  atualizarPartida();
+}
+function seguirDecisao(){
+  M.decisao=null; fecharModal();
+  if(M.fase==="PEN"){ proximaCobranca(); return; }
+  if(M.fim){ atualizarPartida(); return; }
+  M.pausa=false; atualizarPartida(); clearTimeout(M.timer); M.timer=setTimeout(loopPartida,400/M.vel);
+}
+// pênalti: célula 0-8 (linha 0 = alto). Chance de errar o alvo por célula; o goleiro só defende se pular na mesma coluna.
+const ERRO_CEL=[.2,.12,.2,.07,.03,.07,.05,.04,.05], SETAS=["↖","↑","↗","←","●","→","↙","↓","↘"];
+function cobrar(cel,skill,celGk,gk){
+  const r=Math.floor(cel/3), c=cel%3, gr=Math.floor(celGk/3), gc=celGk%3;
+  if(rnd()<ERRO_CEL[cel]*(1.4-.8*skill)) return {gol:false,txt:r===0?"Por cima do travessão!":"Pra fora! Bateu mal na bola."};
+  let def=0; if(gc===c) def=gr===r?.8:Math.abs(gr-r)===1?.45:.15;
+  if(rnd()<def*(.75+.5*gk)) return {gol:false,txt:"DEFENDEU! O goleiro foi no canto certo!"};
+  return {gol:true,txt:gc===c?"GOL! O goleiro foi no canto, mas não alcançou.":"GOL! Bola de um lado, goleiro do outro."};
+}
+const celIA = () => sortearPeso([0,1,2,3,4,5,6,7,8],k=>[.07,.04,.07,.17,.06,.17,.17,.08,.17][k]);
+const celGkIA = () => ri(0,2)*3+sortearPeso([0,1,2],k=>[.4,.2,.4][k]);
+const forcaChute = x => atr(G.jog[x.pid],"Shooting")+ovrEm(G.jog[x.pid],x.pos)/200;
+function batedorDe(i){ return ativos(M.lados[i]).filter(x=>x.pos!=="GOL").sort((a,b)=>forcaChute(b)-forcaChute(a))[0]; }
+function penaltiAuto(i){
+  const b=batedorDe(i); if(!b) return;
+  registrarPenalti(i,b,cobrar(celIA(),atr(G.jog[b.pid],"Shooting"),celGkIA(),goleiroDe(1-i)));
+}
+function registrarPenalti(i,b,r){
+  if(r.gol){ M.gols[i]++; b.g++; b.nota+=.7; evento(M.min,i,"gol",`⚽ Pênalti convertido por ${nomeJ(b)}.`); }
+  else { b.nota-=.4; evento(M.min,i,"chance",`❌ ${nomeJ(b)} perde o pênalti. ${r.txt}`); }
+}
+function gradeGol(acao,marcas){
+  return `<div class="gol-box">${SETAS.map((s,k)=>{ const m=marcas?(marcas.bola===k&&marcas.gk===k?"⚽🧤":marcas.bola===k?"⚽":marcas.gk===k?"🧤":""):s; return `<button ${marcas?"disabled":`onclick="${acao}(${k})"`}>${m}</button>`; }).join("")}</div><div class="gramado"></div>`;
+}
+function abrirPenalti(i){
+  const b=batedorDe(i); if(!b) return;
+  M.pausa=true; clearTimeout(M.timer);
+  const eu=M.lados[i].user;
+  M.decisao={tipo:"penalti",i,b};
+  evento(M.min,i,"info",`🚨 PÊNALTI para o ${CL[M.lados[i].id].c}!`);
+  modal(`<div class="lance-t">${eu?"⚽ PÊNALTI PRA VOCÊ!":"🧤 DEFENDA O PÊNALTI!"}</div><p class="center">${esc(nomeJ(b))} na marca da cal${eu?". Onde vai bater?":". Pra que canto o goleiro pula?"} <span class="mut">(${M.min}')</span></p>${gradeGol("escolherPenalti")}`,true);
+  atualizarPartida();
+}
+function resolverCobranca(k){
+  const dc=M.decisao, eu=M.lados[dc.i].user, cel=eu?k:celIA(), gk=eu?celGkIA():k;
+  return {dc,eu,cel,gk,r:cobrar(cel,atr(G.jog[dc.b.pid],"Shooting"),gk,goleiroDe(1-dc.i))};
+}
+function mostrarCobranca(x){ mostrarResultadoDecisao(x.eu?x.r.gol:!x.r.gol,x.r.txt,gradeGol("",{bola:x.cel,gk:x.gk}),x.eu?null:(x.r.gol?"Não segurou…":"DEFENDEU!")); }
+function escolherPenalti(k){ const x=resolverCobranca(k); registrarPenalti(x.dc.i,x.dc.b,x.r); mostrarCobranca(x); }
+// disputa de pênaltis, cobrança a cobrança
+function iniciarDisputa(){
+  M.fase="PEN"; M.pausa=true; clearTimeout(M.timer);
+  const ordem=i=>ativos(M.lados[i]).filter(x=>x.pos!=="GOL").sort((a,b)=>forcaChute(b)-forcaChute(a));
+  M.disp={n:[0,0],g:[0,0],seq:[],ordem:[ordem(0),ordem(1)]};
+  M.pen={c:0,f:0}; evento(90,-1,"info","🥅 Empate! A vaga vai ser decidida nos pênaltis.");
+  proximaCobranca();
+}
+function disputaDecidida(d){ const [n0,n1]=d.n,[g0,g1]=d.g; if(n0<=5&&n1<=5) return g0>g1+(5-n1)||g1>g0+(5-n0); return n0===n1&&g0!==g1; }
+function proximaCobranca(auto){
+  const d=M.disp;
+  while(!disputaDecidida(d)){
+    const i=d.seq.length%2, lista=d.ordem[i], b=lista[d.n[i]%Math.max(1,lista.length)];
+    if(!b){ anotarCobranca(i,null,{gol:false,txt:"sem batedor"}); continue; }
+    if(!auto){
+      const eu=M.lados[i].user;
+      M.decisao={tipo:"disputa",i,b};
+      modal(`<div class="lance-t">${eu?"⚽ SUA COBRANÇA":"🧤 COBRANÇA DELES"}</div><p class="center"><b>${esc(CL[M.j.casa].c)} ${d.g[0]} × ${d.g[1]} ${esc(CL[M.j.fora].c)}</b><br>${esc(nomeJ(b))} ${eu?"vai bater. Onde?":"vai bater. Pra que canto você pula?"}</p>${gradeGol("cobrarDisputa")}<button style="width:100%;margin-top:8px" onclick="proximaCobranca(true)">⏩ Resolver automaticamente</button>`,true);
+      atualizarPartida(); return;
+    }
+    anotarCobranca(i,b,cobrar(celIA(),atr(G.jog[b.pid],"Shooting"),celGkIA(),goleiroDe(1-i)));
+  }
+  M.decisao=null; fecharModal(); concluirPartida(); atualizarPartida();
+}
+function anotarCobranca(i,b,r){
+  const d=M.disp; d.n[i]++; if(r.gol) d.g[i]++; d.seq.push({i,ok:r.gol});
+  M.pen={c:d.g[0],f:d.g[1],seq:d.seq};
+  if(b) evento(90,i,r.gol?"gol":"chance",`${r.gol?"✅":"❌"} ${nomeJ(b)} — ${r.txt}`);
+}
+function cobrarDisputa(k){ const x=resolverCobranca(k); anotarCobranca(x.dc.i,x.dc.b,x.r); mostrarCobranca(x); }
+function encerrarPartida(){
+  const j=M.j;
+  if(j.comp!=="L"&&M.gols[0]===M.gols[1]){
+    if(M.interativo){ iniciarDisputa(); return; }
+    const S=M.lados.map(setoresLado);
+    M.pen=penaltisRapido(clamp(.74+(S[0].a-S[1].d)/200,.55,.9),clamp(.74+(S[1].a-S[0].d)/200,.55,.9));
+  }
+  concluirPartida();
+}
+function concluirPartida(){
+  const j=M.j, r=Object.assign({},j,{gc:M.gols[0],gf:M.gols[1],pen:M.pen});
+  if(r.pen) evento(90,-1,"info",`🥅 Pênaltis: ${CL[j.casa].c} ${r.pen.c} x ${r.pen.f} ${CL[j.fora].c}`);
   evento(90,-1,"info","🏁 Fim de jogo.");
   M.fase="FIM"; M.fim=true; M.res=r;
   const dm=G.cl[G.clubeId].dm;
@@ -756,7 +917,7 @@ function jogar(simular){
   if(!escalacaoOk()){ toast("Arrume a escalação antes do jogo."); return irAba("tatica"); }
   criarPartida(meuJogo());
   if(simular){ while(!M.fim){ if(M.fase==="INT") M.fase="2T"; tickPartida(); } return fecharData(M.res); }
-  UI.tela="partida"; render();
+  M.interativo=true; UI.tela="partida"; render();
 }
 function telaPartida(){
   const j=M.j, d=G.cal[G.di];
@@ -771,7 +932,7 @@ function atualizarPartida(){
   if(!M||UI.tela!=="partida") return;
   const $=id=>document.getElementById(id), eu=M.lados.find(L=>L.user), tp=M.lados[0].posse+M.lados[1].posse;
   $("pl").textContent=`${M.gols[0]} - ${M.gols[1]}`+(M.pen?` (${M.pen.c}-${M.pen.f})`:"");
-  $("relogio").textContent=M.fim?"Fim de jogo":M.fase==="INT"?"Intervalo":M.min+"'";
+  $("relogio").textContent=M.fim?"Fim de jogo":M.fase==="INT"?"Intervalo":M.fase==="PEN"?"Pênaltis":M.min+"'";
   $("relogio").style.color=M.min>=80&&!M.fim?"var(--bad)":"var(--ac)";
   $("stats").textContent=`Finalizações ${M.lados[0].fin} × ${M.lados[1].fin} · Posse ${tp?Math.round(M.lados[0].posse/tp*100):50}% × ${tp?Math.round(M.lados[1].posse/tp*100):50}%`;
   $("feed").innerHTML=M.ev.slice().reverse().map(e=>`<div class="${e.tipo==="gol"?"gol":""}"><span class="mut">${e.min}'</span> ${e.lado>=0?`<b>${esc(CL[M.lados[e.lado].id].c)}:</b> `:""}${esc(e.txt)}</div>`).join("");
@@ -788,13 +949,13 @@ function loopPartida(){
   if(!M.fim&&!M.pausa&&M.fase!=="INT") M.timer=setTimeout(loopPartida,400/M.vel);
 }
 function pausarOuSeguir(){
-  if(M.fim) return;
+  if(M.fim||M.decisao||M.fase==="PEN") return;
   clearTimeout(M.timer);
   if(M.fase==="INT"){ M.fase="2T"; M.pausa=false; } else M.pausa=!M.pausa;
   atualizarPartida(); if(!M.pausa) M.timer=setTimeout(loopPartida,400/M.vel);
 }
 function velocidade(){ M.vel=M.vel===1?2:M.vel===2?4:1; atualizarPartida(); }
-function irAoFim(){ if(M.fim) return; clearTimeout(M.timer); while(!M.fim){ if(M.fase==="INT") M.fase="2T"; tickPartida(); } atualizarPartida(); }
+function irAoFim(){ if(M.fim||M.decisao||M.fase==="PEN") return; M.interativo=false; clearTimeout(M.timer); while(!M.fim){ if(M.fase==="INT") M.fase="2T"; tickPartida(); } atualizarPartida(); }
 function mudarMentPartida(v){ G.ment=v; M.lados.find(L=>L.user).ment=v; }
 function abrirSubs(){
   if(M.fim) return; clearTimeout(M.timer); M.pausa=true; atualizarPartida();
@@ -838,7 +999,7 @@ async function boot(){
   const porClube={};
   D.jogadores.forEach(j=>{ AT[j.id]=j.at; (porClube[j.t]=porClube[j.t]||[]).push(Math.max(...Object.values(j.pos))); });
   D.clubes.forEach(c=>{ const v=(porClube[c.id]||[30]).sort((a,b)=>b-a).slice(0,11); FORCA0[c.id]=v.reduce((s,x)=>s+x,0)/v.length; });
-  document.getElementById("modal").addEventListener("click",e=>{ if(e.target.id==="modal") fecharModal(); });
+  document.getElementById("modal").addEventListener("click",e=>{ if(e.target.id==="modal"&&!UI.modalFixo) fecharModal(); });
   render();
 }
 boot();
