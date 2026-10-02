@@ -201,6 +201,7 @@ function novoJogador(cid,pos,o,idade,pot){
   const id="g"+(G.seq++);
   const p={id,n:String.fromCharCode(65+ri(0,25))+". "+pick(SOBRENOMES),c:cid,a:idade,nat:"BRA",pos:{[pos]:clamp(Math.round(o),25,97)},d:0,pot:0,cond:100,mor:60,les:0,sus:0,am:0,st:{j:0,g:0,a:0,ns:0}};
   p.pot=pot!==undefined?pot:(idade<=23?clamp(p.pos[pos]+ri(2,10),0,97):p.pos[pos]);
+  p.ct=idade<=18?3:ri(1,3); if(cid===G.clubeId) p.sal=salario(p);
   G.jog[id]=p; G.el[cid].push(id); return p;
 }
 function completarElenco(cid){
@@ -215,7 +216,8 @@ function completarElenco(cid){
 function transferir(pid,para){
   const p=G.jog[pid], de=p.c;
   G.el[de]=G.el[de].filter(x=>x!==pid); G.el[para].push(pid); p.c=para; p.mor=65;
-  if(de===G.clubeId){ G.xi=G.xi.map(x=>x===pid?null:x); delete G.venda[pid]; G.ofertas=G.ofertas.filter(o=>o.pid!==pid); }
+  if(de===G.clubeId){ G.xi=G.xi.map(x=>x===pid?null:x); delete G.venda[pid]; G.ofertas=G.ofertas.filter(o=>o.pid!==pid); delete p.sal; }
+  if(para===G.clubeId){ p.sal=Math.round(salario(p)*1.1/10)*10; p.ct=ri(2,4); }
   MEMO={};
   if(de!==G.clubeId) completarElenco(de);
   if(para!==G.clubeId && G.el[para].length>22){ // clube da IA dispensa o mais fraco pra não inchar o save
@@ -267,18 +269,51 @@ function novoJogo(nome,clubeId){
   D.clubes.forEach(c=>{ G.div[c.id]=c.div; G.el[c.id]=[]; });
   D.jogadores.forEach(j=>{
     const pos=Object.assign({},j.pos), best=Math.max(...Object.values(pos));
-    G.jog[j.id]={id:j.id,n:j.n,c:j.t,a:j.a,nat:j.nat,pos,d:0,pot:j.a<=23?clamp(best+ri(2,10),0,97):best,cond:100,mor:60,les:0,sus:0,am:0,st:{j:0,g:0,a:0,ns:0},real:1};
+    G.jog[j.id]={id:j.id,n:j.n,c:j.t,a:j.a,nat:j.nat,pos,d:0,pot:j.a<=23?clamp(best+ri(2,10),0,97):best,cond:100,mor:60,les:0,sus:0,am:0,st:{j:0,g:0,a:0,ns:0},real:1,ct:ri(1,4)};
     G.el[j.t].push(j.id);
   });
   D.clubes.forEach(c=>{ G.cl[c.id]={cx:0,cap:c.cap,ct:1,base:1,dm:1,form:pick(Object.keys(FORM)),pat:0}; });
   D.clubes.forEach(c=>completarElenco(c.id));
   D.clubes.forEach(c=>{ const t=tier(c.div); G.cl[c.id].cx=Math.round({3:8e6,2:3.5e6,1:1.2e6}[t]*(.7+rnd()*.6)/1e4)*1e4; });
   iniciarTemporada();
-  G.form=G.cl[clubeId].form; autoEscalar();
+  G.form=G.cl[clubeId].form; G.contratosV=1; elenco(clubeId).forEach(p=>p.sal=salario(p)); autoEscalar();
   noticia(`${nome} é o novo técnico do ${CL[clubeId].n}.`);
   salvar();
 }
-function folha(cid){ return elenco(cid).reduce((s,p)=>s+salario(p),0); }
+function folha(cid){ return elenco(cid).reduce((s,p)=>s+salDe(p),0); }
+/* ---------- contratos e janela ---------- */
+const salDe = p => p.c===G.clubeId&&p.sal?p.sal:salario(p);
+function contratosInit(){
+  if(G.contratosV) return; G.contratosV=1;
+  for(const id in G.jog){ const p=G.jog[id]; if(p.ct===undefined) p.ct=ri(1,4); }
+  elenco(G.clubeId).forEach(p=>{ if(!p.sal) p.sal=salario(p); });
+}
+const pedidaRenovacao = p => Math.round(salario(p)*(p.a>=32?.9:1.1)/10)*10;
+function chanceRenovar(p,f){
+  let c=f<1?.35:f===1?.72:.93;
+  c*=clamp(.55+p.mor/110,.6,1.1); if(!G.xi.includes(p.id)) c*=.85; if(p.a>=32) c*=1.15;
+  return clamp(c,.05,.97);
+}
+function renovar(pid,f){
+  const p=G.jog[pid], anos=UI.anosRen||3, sal=Math.round(pedidaRenovacao(p)*f/10)*10, luva=sal*4, c=G.cl[G.clubeId];
+  G.bloqRen=G.bloqRen||{};
+  if(G.bloqRen[pid]>G.di) return toast("O empresário pediu um tempo. Tente daqui a algumas rodadas.");
+  if(c.cx<luva) return toast("Sem caixa para a luva.");
+  if(rnd()<chanceRenovar(p,f)){ c.cx-=luva; p.sal=sal; p.ct=anos; p.mor=clamp(p.mor+5,15,95); noticia(`✍️ ${p.n} renovou por ${anos} temporada(s): ${din(sal)} por jogo.`); toast(`${p.n} renovou!`); }
+  else { G.bloqRen[pid]=G.di+3; p.mor=clamp(p.mor-5,15,95); toast(`${p.n} recusou a proposta.`); }
+  salvar(); render(); ficha(pid);
+}
+function rodadaLiga(){ return G.cal.slice(0,G.di).filter(d=>d.t==="L").length+1; }
+function janela(){ const r=rodadaLiga(); if(r<=5) return {aberta:true,ate:5}; if(r>=12&&r<=14) return {aberta:true,ate:14}; return {aberta:false,abre:r<12?12:null}; }
+const textoJanela = () => { const j=janela(); return j.aberta?`🟢 Janela aberta até a rodada ${j.ate}`:`🔴 Janela fechada · ${j.abre?"reabre na rodada "+j.abre:"reabre na próxima temporada"}`; };
+function blocoContrato(p){
+  const pedida=pedidaRenovacao(p), bl=(G.bloqRen||{})[p.id]>G.di, anos=UI.anosRen||3;
+  return `<h3 style="margin-top:14px">Contrato</h3><div class="kv"><span>Salário atual</span><b>${din(salDe(p))} por jogo</b></div><div class="kv"><span>Duração</span><b class="${p.ct<=1?"neg":""}">${p.ct<=1?"último ano":p.ct+" temporadas"}</b></div>
+  ${p.ct<=2?(bl?`<p class="neg" style="font-size:13px">O empresário pediu um tempo antes de voltar a conversar.</p>`:`<div class="mut" style="font-size:13px;margin:8px 0 6px">Ele pede ${din(pedida)} por jogo. Luva = 4 salários.</div>
+  <div class="row" style="gap:6px;margin-bottom:8px">${[1,2,3,4].map(a=>`<span class="chip ${anos===a?"on":""}" style="flex:1;text-align:center" onclick="UI.anosRen=${a};ficha('${p.id}')">${a} ${a>1?"anos":"ano"}</span>`).join("")}</div>
+  ${[[.9,"Abaixo da pedida"],[1,"Na pedida"],[1.15,"Acima da pedida"]].map(([f,l])=>{ const sal=Math.round(pedida*f/10)*10; return `<button class="op" onclick="renovar('${p.id}',${f})"><span class="pct">${Math.round(chanceRenovar(p,f)*100)}%</span>${l}: ${din(sal)}/jogo<small>Luva de ${din(sal*4)}</small></button>`; }).join("")}`):""}`;
+}
+
 function gerarRodadas(ids){
   const t=embaralhar(ids.slice()), n=t.length, R=[];
   for(let r=0;r<n-1;r++){ const jogos=[]; for(let i=0;i<n/2;i++){ const a=t[i],b=t[n-1-i]; jogos.push(r%2?[b,a]:[a,b]); } R.push(jogos); t.splice(1,0,t.pop()); }
@@ -828,6 +863,7 @@ function fecharData(resU){
   mercadoIA();
   if(G.gramadoRuim>0&&resU&&resU.casa===G.clubeId) G.gramadoRuim--;
   G.di++; MEMO={}; G.ultimo=rel; M=null; sortearClima();
+  if(G.di<G.cal.length&&!janela().aberta&&G.ofertas.length){ G.ofertas=[]; noticia("🔴 A janela fechou. Propostas pendentes caducaram."); }
   if(G.di>=G.cal.length){ fimTemporada(); UI.tela="fim"; }
   else {
     UI.tela="jogo"; UI.aba="inicio";
@@ -838,6 +874,7 @@ function fecharData(resU){
   if(G.di<G.cal.length&&UI.tela==="jogo"&&!G.demitido) mostrarRelatorio();
 }
 function mercadoIA(){
+  if(!janela().aberta){ if(G.ofertas.length) noticia("🔴 A janela fechou. Propostas pendentes caducaram."); G.ofertas=[]; return; }
   G.ofertas=G.ofertas.filter(o=>o.exp>G.di&&G.jog[o.pid]&&G.jog[o.pid].c===G.clubeId);
   const meus=elenco(G.clubeId), outros=Object.keys(G.cl).filter(id=>id!==G.clubeId);
   meus.forEach(p=>{
@@ -962,6 +999,7 @@ function esperarTelefone(){ const d=G.demitido; d.espera++; d.log.push(d.espera>
 function assumir(cid,motivo){
   tecInit(); if(!G.tec.clubes.includes(cid)) G.tec.clubes.push(cid); G.tec.desde[cid]=G.ano; if(G.tec.clubes.length>=3) conquistar("viajante");
   G.clubeId=cid; G.conf=55; G.avisoConf=false; G.venda={}; G.ofertas=[]; G.demitido=null; G.reuniaoNova=true; G.form=G.cl[cid].form; G.ment="N"; MEMO={};
+  elenco(cid).forEach(p=>{ if(!p.sal) p.sal=salario(p); if(p.ct===undefined) p.ct=ri(1,4); });
   autoEscalar(); definirObjetivo(); noticia(`${G.tec.nome} assume o ${CL[cid].n}${motivo?" "+motivo:""}.`);
 }
 function aceitarEmprego(cid){ const eraFim=!!G.resumo; assumir(cid,""); fecharModal(); if(eraFim) novaTemporada(); else { UI.tela="reuniao"; salvar(); render(); window.scrollTo(0,0); } }
@@ -994,6 +1032,13 @@ function fimTemporada(){
   if(G.st.zona&&R.mov!=="R") conquistar("sobrevivente");
   if(elenco(eu).filter(p=>p.a<=21).reduce((s_,p)=>s_+p.st.j,0)>=30) conquistar("formador");
   if(G.tec.rep>=90) conquistar("lenda");
+  // contratos: quem estava no último ano e não renovou sai de graça
+  R.saidas=[];
+  for(const id of Object.keys(G.jog)){
+    const p=G.jog[id]; if(!p) continue; p.ct=(p.ct||1)-1; if(p.ct>0) continue;
+    if(p.c===eu){ const dest=pick(Object.keys(G.cl).filter(c=>c!==eu&&tier(G.div[c])<=tier(dv)))||pick(Object.keys(G.cl).filter(c=>c!==eu)); R.saidas.push(p.n); transferir(id,dest); }
+    p.ct=ri(1,3);
+  }
   // envelhecimento, evolução, aposentadoria
   for(const id of Object.keys(G.jog)){
     const p=G.jog[id], meu=p.c===eu, o=ovr(p); p.a++;
@@ -1005,6 +1050,7 @@ function fimTemporada(){
       else novoJogador(p.c,melhorPos(p),p.pos[melhorPos(p)]-ri(0,5),ri(19,24)); // "regen" mantém o nível do clube
     }
   }
+  while(G.el[eu].length<16){ const p=novoJogador(eu,pick(POS),forca(eu)-ri(8,14),ri(22,30)); R.livres=(R.livres||[]).concat(p.n); }
   const base=G.cl[eu].base, f0=forca(eu);
   for(let i=0;i<2;i++){ const o=Math.round(f0-22+base*2+ri(0,6)); const p=novoJogador(eu,pick(POS),o,ri(16,18),clamp(o+8+ri(0,4+base*2),0,97)); R.jovens.push(`${p.n} (${melhorPos(p)} ${ovr(p)})`); }
   G.venda={}; G.ofertas=[];
@@ -1043,7 +1089,7 @@ function render(){
 function irAba(a){ UI.aba=a; render(); window.scrollTo(0,0); }
 function topo(){
   const c=CL[G.clubeId], d=G.cal[G.di];
-  return `<div class="topo row">${crest(G.clubeId,34)}<div class="grow"><div class="cond trunc" style="font-size:19px;font-weight:800">${esc(c.n)}</div><div class="mut" style="font-size:12px">${DIV_NOME[G.div[G.clubeId]]} · ${G.ano} · ${dataLabel(d)}</div></div><div class="right"><div class="cond ${G.cl[G.clubeId].cx<0?"neg":"ac"}" style="font-size:19px;font-weight:800">${din(G.cl[G.clubeId].cx)}</div><div class="mut" style="font-size:12px">caixa</div></div></div>`;
+  return `<div class="topo row">${crest(G.clubeId,34)}<div class="grow"><div class="cond trunc" style="font-size:19px;font-weight:800">${esc(c.n)}</div><div class="mut" style="font-size:12px">${DIV_NOME[G.div[G.clubeId]]} · ${G.ano} · ${dataLabel(d)} · ${janela().aberta?"🟢 janela":"🔴 janela"}</div></div><div class="right"><div class="cond ${G.cl[G.clubeId].cx<0?"neg":"ac"}" style="font-size:19px;font-weight:800">${din(G.cl[G.clubeId].cx)}</div><div class="mut" style="font-size:12px">caixa</div></div></div>`;
 }
 
 /* ---------- capa e escolha de clube ---------- */
@@ -1066,7 +1112,7 @@ function comecar(){
   if(localStorage.getItem(SAVE_KEY)&&!confirm("Já existe uma carreira salva. Começar outra apaga a anterior. Continuar?")) return;
   UI.nome=n; UI.divEsc=UI.sug?CL[UI.sug].div:"CB"; UI.tela="escolha"; render();
 }
-function continuar(){ try{ G=JSON.parse(localStorage.getItem(SAVE_KEY)); MEMO={}; UI.tela=G.resumo?"fim":"jogo"; UI.aba="inicio"; render(); }catch(e){ toast("Save corrompido."); } }
+function continuar(){ try{ G=JSON.parse(localStorage.getItem(SAVE_KEY)); MEMO={}; contratosInit(); UI.tela=G.resumo?"fim":"jogo"; UI.aba="inicio"; render(); }catch(e){ toast("Save corrompido."); } }
 function telaEscolha(){
   const cs=D.clubes.filter(c=>c.div===UI.divEsc).sort((a,b)=>FORCA0[b.id]-FORCA0[a.id]);
   return `<h2 style="margin:8px 0">Escolha seu clube</h2><div class="chips">${DIVS.map(d=>`<span class="chip ${d===UI.divEsc?"on":""}" onclick="UI.divEsc='${d}';render()">${d==="CB"?"Brasileirão":d}</span>`).join("")}</div>
@@ -1099,9 +1145,11 @@ function abaInicio(){
     <div class="row"><button class="pri grow" onclick="jogar(false)">▶ Jogar</button><button class="grow" onclick="jogar(true)">⏩ Simular</button></div></div>`;
   } else prox=`<div class="card"><h3>${dataLabel(d)}</h3><p class="mut">Seu clube não joga nesta data.</p><button class="pri" style="width:100%" onclick="fecharData(null)">Avançar ▶</button></div>`;
   const ev=G.evento!==null&&G.evento!==undefined?`<div class="card" style="border-color:var(--ac)"><h3>⚡ ${CAT_EV[EVENTOS[G.evento].cat]||"Decisão"}</h3><p>${EVENTOS[G.evento].t}</p>${EVENTOS[G.evento].ops.map((o,i)=>`<button style="width:100%;margin-bottom:6px;text-transform:none" onclick="escolherEvento(${i})">${o.l}</button>`).join("")}</div>`:"";
+  const venc=G.di>=G.cal.length/2?elenco(G.clubeId).filter(p=>p.ct<=1).length:0;
+  const avisoCt=venc?`<div class="card" style="border-color:var(--ac)"><div class="row"><div class="grow">📄 <b>${venc}</b> jogador(es) no último ano de contrato.</div><button class="sm" onclick="UI.elAba='contratos';irAba('elenco')">Ver</button></div></div>`:"";
   const of=G.ofertas.length?`<div class="card" style="border-color:var(--ok)"><div class="row"><div class="grow">💰 Você tem <b>${G.ofertas.length}</b> proposta(s) por jogadores.</div><button class="sm" onclick="UI.mercAba='vender';irAba('mercado')">Ver</button></div></div>`:"";
   const ini=clamp(pos-3,0,7), mini=cl.slice(ini,ini+5).map((x,i)=>linhaTabela(x,ini+i,dv)).join("");
-  return `${ev}${prox}${of}
+  return `${ev}${prox}${of}${avisoCt}
   <div class="card"><h3>Diretoria</h3><div class="row" style="margin-bottom:6px"><span style="font-size:24px">${PERFIS[presDe(G.clubeId).perfil].e}</span><div class="grow"><b>${esc(presDe(G.clubeId).n)}</b><div class="mut" style="font-size:12px">Presidente · ${presDe(G.clubeId).perfil}</div></div><button class="sm" onclick="abrirConversa()">💬 Reunião (${2-(G.reunioes||0)})</button></div><div class="kv"><span>${iconeObjetivo()} Objetivo</span><b>${G.obj.txt}</b></div>${diretrizes().map(d=>`<div class="kv" style="font-size:13px"><span class="mut">${d.ic} ${esc(d.txt)}</span><b class="${d.ok()?"pos":"mut"}">${d.ok()?"✓":"…"}</b></div>`).join("")}<div class="kv"><span>Posição atual</span><b>${cl[pos-1].j?pos+"º":"—"}</b></div><div style="margin-top:8px" class="row"><span class="mut">Confiança</span><div class="bar grow"><i style="width:${G.conf}%;background:${G.conf<25?"var(--bad)":G.conf<50?"var(--ac)":"var(--ok)"}"></i></div><b>${Math.round(G.conf)}</b></div>${G.conf<25?`<div class="neg" style="margin-top:6px;font-size:13px">A diretoria está perdendo a paciência.</div>`:""}</div>
   <div class="card"><h3>${DIV_NOME[dv]}</h3><table>${CAB_TAB}${mini}</table><button class="sm" style="margin-top:8px" onclick="irAba('mundo')">Tabela completa</button></div>
   <div class="card"><h3>Notícias</h3>${G.news.slice(0,7).map(n=>`<div style="padding:4px 0;border-bottom:1px solid var(--lin);font-size:14px">${esc(n.t)}</div>`).join("")||`<span class="mut">Nada por enquanto.</span>`}</div>`;
@@ -1124,13 +1172,20 @@ function mostrarRelatorio(){
 }
 
 /* ---------- elenco e ficha ---------- */
-function statusJ(p){ return (p.les>0?`🚑${p.les} `:"")+(p.sus>0?"🟥 ":"")+(p.am>0?`🟨${p.am} `:"")+(G.venda[p.id]?"💰 ":"")+(p.a<=23&&p.pot>=ovr(p)+5?"⭐":""); }
+function statusJ(p){ return (p.c===G.clubeId&&p.ct<=1?"📄 ":"")+(p.les>0?`🚑${p.les} `:"")+(p.sus>0?"🟥 ":"")+(p.am>0?`🟨${p.am} `:"")+(G.venda[p.id]?"💰 ":"")+(p.a<=23&&p.pot>=ovr(p)+5?"⭐":""); }
 function abaElenco(){
-  const ps=elenco(G.clubeId).sort((a,b)=>POS.indexOf(melhorPos(a))-POS.indexOf(melhorPos(b))||ovr(b)-ovr(a)), tit=new Set(G.xi);
-  return `<div class="card"><div class="row" style="margin-bottom:6px"><h3 class="grow" style="margin:0">Elenco (${ps.length})</h3><span class="mut" style="font-size:13px">Folha: ${din(folha(G.clubeId))}/jogo</span></div>
+  contratosInit();
+  const ps=elenco(G.clubeId).sort((a,b)=>POS.indexOf(melhorPos(a))-POS.indexOf(melhorPos(b))||ovr(b)-ovr(a)), tit=new Set(G.xi), venc=ps.filter(p=>p.ct<=1).length;
+  const chips=`<div class="chips"><span class="chip ${UI.elAba!=="contratos"?"on":""}" onclick="UI.elAba='jogadores';render()">Jogadores</span><span class="chip ${UI.elAba==="contratos"?"on":""}" onclick="UI.elAba='contratos';render()">Contratos${venc?` (${venc} vencendo)`:""}</span></div>`;
+  if(UI.elAba==="contratos"){
+    const grupo=(tit_,lst)=>lst.length?`<h3>${tit_} (${lst.length})</h3><div class="card">${lst.map(p=>`<div class="row clk" style="padding:6px 0;border-bottom:1px solid var(--lin);cursor:pointer" onclick="ficha('${p.id}')"><span class="pp ${melhorPos(p)}">${melhorPos(p)}</span><span class="grow trunc">${esc(p.n)} <span class="mut" style="font-size:12px">${p.a}a</span></span><span class="mut" style="font-size:12px">${din(salDe(p))}</span><span class="ovr">${ovr(p)}</span></div>`).join("")}</div>`:"";
+    return chips+`<div class="card"><div class="kv"><span>Folha por jogo</span><b>${din(folha(G.clubeId))}</b></div><div class="kv"><span>Valor do elenco</span><b>${din(ps.reduce((s_,p)=>s_+valor(p),0))}</b></div><div class="mut" style="font-size:12px;margin-top:6px">Quem estiver no último ano e não renovar sai de graça no fim da temporada. Toque no jogador para renovar.</div></div>`
+      +grupo("⚠️ Vence nesta temporada",ps.filter(p=>p.ct<=1))+grupo("Vence na próxima",ps.filter(p=>p.ct===2))+grupo("Em dia",ps.filter(p=>p.ct>=3));
+  }
+  return chips+`<div class="card"><div class="row" style="margin-bottom:6px"><h3 class="grow" style="margin:0">Elenco (${ps.length})</h3><span class="mut" style="font-size:13px">Folha: ${din(folha(G.clubeId))}/jogo</span></div>
   <table><tr><th>Pos</th><th>Jogador</th><th class="n">Id</th><th class="n">OVR</th><th>Cond.</th><th class="n">J</th><th class="n">G</th><th class="n">Nota</th></tr>
   ${ps.map(p=>`<tr class="clk" onclick="ficha('${p.id}')"><td><span class="pp ${melhorPos(p)}">${melhorPos(p)}</span></td><td><div class="trunc" style="max-width:150px">${tit.has(p.id)?"<b>":""}${esc(p.n)}${tit.has(p.id)?"</b>":""}</div><div style="font-size:11px">${statusJ(p)}</div></td><td class="n ${p.a>=34?"neg":""}">${p.a}</td><td class="n ovr">${ovr(p)}</td><td><div class="bar"><i style="width:${p.cond}%;background:${p.cond<70?"var(--bad)":p.cond<85?"var(--ac)":"var(--ok)"}"></i></div></td><td class="n">${p.st.j}</td><td class="n">${p.st.g}</td><td class="n">${p.st.j?(p.st.ns/p.st.j).toFixed(1):"–"}</td></tr>`).join("")}</table>
-  <div class="mut" style="font-size:12px;margin-top:8px">Negrito = titular · 🚑 lesão (jogos) · 🟥 suspenso · 🟨 amarelos · 💰 à venda · ⭐ promessa · idade em vermelho = perto de se aposentar</div></div>`;
+  <div class="mut" style="font-size:12px;margin-top:8px">Negrito = titular · 🚑 lesão (jogos) · 🟥 suspenso · 🟨 amarelos · 💰 à venda · ⭐ promessa · 📄 último ano de contrato · idade em vermelho = perto de se aposentar</div></div>`;
 }
 function ficha(pid){
   const p=G.jog[pid], meu=p.c===G.clubeId, at=AT[pid];
@@ -1138,16 +1193,16 @@ function ficha(pid){
   if(meu){
     acoes=`<div class="row" style="margin-top:12px"><button class="grow" onclick="alternarVenda('${pid}')">${G.venda[pid]?"Tirar da lista de venda":"Colocar à venda"}</button><button class="per" onclick="dispensar('${pid}')">Dispensar</button></div>`;
   } else {
-    const pr=preco(p), bl=G.bloq[pid]>G.di, cheio=G.el[G.clubeId].length>=28;
-    acoes=`<h3 style="margin-top:14px">Negociar · pedida ${din(pr)}</h3>${bl?`<p class="neg">O ${esc(CL[p.c].c)} encerrou as conversas por enquanto.</p>`:cheio?`<p class="neg">Elenco cheio (28).</p>`:[[.85,"Oferta baixa"],[1,"Oferta justa"],[1.2,"Oferta alta"]].map(([f,l])=>{ const v=Math.round(pr*f/1000)*1000, ch=chanceCompra(p,f); return `<button style="width:100%;margin-bottom:6px;text-transform:none" ${G.cl[G.clubeId].cx<v?"disabled":""} onclick="ofertar('${pid}',${f})">${l}: ${din(v)} — ${Math.round(ch*100)}% de chance</button>`; }).join("")}`;
+    const pr=preco(p), bl=G.bloq[pid]>G.di, cheio=G.el[G.clubeId].length>=26, jn=janela();
+    acoes=`<h3 style="margin-top:14px">Negociar · pedida ${din(pr)}</h3>${grandeDemais(p)?`<p class="ac" style="font-size:13px">⚠️ Ele acha seu clube pequeno demais para o nível dele. Só uma oferta alta convence.</p>`:""}${!jn.aberta?`<p class="neg">${textoJanela()}.</p>`:bl?`<p class="neg">O ${esc(CL[p.c].c)} encerrou as conversas por enquanto.</p>`:cheio?`<p class="neg">Elenco cheio (26). Abra espaço antes de contratar.</p>`:[[.85,"Oferta baixa"],[1,"Oferta justa"],[1.2,"Oferta alta"]].map(([f,l])=>{ const v=Math.round(pr*f/1000)*1000, ch=chanceCompra(p,f); return `<button style="width:100%;margin-bottom:6px;text-transform:none" ${G.cl[G.clubeId].cx<v?"disabled":""} onclick="ofertar('${pid}',${f})">${l}: ${din(v)} — ${Math.round(ch*100)}% de chance</button>`; }).join("")}`;
   }
   modal(`<div class="row"><div style="width:64px;height:64px;border-radius:50%;background:#0d1729 url('${kitUrl(p.c)}') center 12%/cover;border:2px solid var(--lin);flex:none"></div><div class="grow"><h2>${esc(p.n)}</h2><div class="mut">${p.a} anos · ${p.nat} · ${crest(p.c,18)} ${esc(CL[p.c].c)}</div></div><div class="center"><div class="ovr ac" style="font-size:34px">${ovr(p)}</div><div class="mut" style="font-size:11px">${p.a<=23?"pot. "+p.pot:"overall"}</div></div></div>
   <div style="margin:10px 0">${POS.filter(k=>p.pos[k]!==undefined).map(k=>`<span class="pp ${k}">${k} ${clamp(p.pos[k]+p.d,1,99)}</span>`).join(" ")}</div>
-  <div class="kv"><span>Valor</span><b>${din(valor(p))}</b></div><div class="kv"><span>Salário por jogo</span><b>${din(salario(p))}</b></div>
+  <div class="kv"><span>Valor</span><b>${din(valor(p))}</b></div><div class="kv"><span>Salário por jogo</span><b>${din(salDe(p))}</b></div>
   <div class="kv"><span>Temporada</span><b>${p.st.j} jogos · ${p.st.g} gols · ${p.st.a} assist.${p.st.j?" · nota "+(p.st.ns/p.st.j).toFixed(2):""}</b></div>
   ${meu?`<div class="kv"><span>Condição / Moral</span><b>${Math.round(p.cond)}% / ${Math.round(p.mor)}</b></div>`:""}
   ${at?`<h3 style="margin-top:14px">Atributos (Dugout, 1–50)</h3><div class="attr">${D.atributos.map((a,i)=>`<div><span class="mut">${ATR_PT[a]}</span><b>${at[i]}</b></div>`).join("")}</div>`:`<p class="mut" style="font-size:13px">Jogador da base/regenerado — sem ficha no Dugout.</p>`}
-  ${acoes}<button style="width:100%;margin-top:10px" onclick="fecharModal()">Fechar</button>`);
+  ${meu?blocoContrato(p):""}${acoes}<button style="width:100%;margin-top:10px" onclick="fecharModal()">Fechar</button>`);
 }
 function alternarVenda(pid){ if(G.venda[pid]) delete G.venda[pid]; else G.venda[pid]=1; salvar(); render(); ficha(pid); }
 function dispensar(pid){
@@ -1183,11 +1238,15 @@ function preco(p){ return Math.round(valor(p)*(ehTitular(p)?1.6:1.15)*(G.tec.ges
 function chanceCompra(p,f){
   let c=f<1?.25:f===1?.65:.95;
   if(ehTitular(p)&&tier(G.div[G.clubeId])<tier(G.div[p.c])) c*=.35; // titular de divisão acima reluta em descer
+  if(grandeDemais(p)) c*=f>1?.6:.2;
   return c;
 }
+function grandeDemais(p){ return ovr(p)>forca(G.clubeId)+8; }
 function ofertar(pid,f){
   const p=G.jog[pid], v=Math.round(preco(p)*f/1000)*1000, de=p.c;
   if(G.cl[G.clubeId].cx<v) return toast("Caixa insuficiente.");
+  if(!janela().aberta) return toast("Janela de transferências fechada.");
+  if(G.el[G.clubeId].length>=26) return toast("Elenco cheio.");
   if(rnd()<chanceCompra(p,f)){
     G.cl[G.clubeId].cx-=v; G.cl[de].cx+=v; G.fin.transf-=v; transferir(pid,G.clubeId);
     noticia(`✍️ ${p.n} chega do ${CL[de].n} por ${din(v)}.`); fecharModal(); salvar(); render(); toast(`${p.n} contratado!`);
@@ -1196,6 +1255,7 @@ function ofertar(pid,f){
 function responderOferta(i,aceita){
   const o=G.ofertas[i], p=G.jog[o.pid];
   if(aceita){
+    if(!janela().aberta) return toast("Janela de transferências fechada.");
     if(G.el[G.clubeId].length<=14) return toast("Elenco mínimo de 14 jogadores.");
     G.cl[G.clubeId].cx+=o.valor; G.fin.transf+=o.valor; noticia(`🤝 ${p.n} vendido ao ${CL[o.clube].n} por ${din(o.valor)}.`); transferir(o.pid,o.clube);
   } else G.ofertas.splice(i,1);
@@ -1208,12 +1268,12 @@ function abaMercado(){
     return chips+`<div class="card"><h3>Propostas recebidas</h3>${G.ofertas.map((o,i)=>{ const p=G.jog[o.pid]; return `<div style="padding:8px 0;border-bottom:1px solid var(--lin)"><div class="row">${crest(o.clube,26)}<div class="grow"><b>${esc(p.n)}</b> <span class="mut">(${melhorPos(p)} ${ovr(p)}, vale ${din(valor(p))})</span><div class="mut" style="font-size:13px">${esc(CL[o.clube].n)} oferece <b class="pos">${din(o.valor)}</b></div></div></div><div class="row" style="margin-top:6px"><button class="sm pri grow" onclick="responderOferta(${i},true)">Aceitar</button><button class="sm grow" onclick="responderOferta(${i},false)">Recusar</button></div></div>`; }).join("")||`<span class="mut">Nenhuma proposta no momento.</span>`}</div>
     <div class="card"><h3>Lista de venda</h3>${lst.map(p=>`<div class="row clk" style="padding:6px 0;border-bottom:1px solid var(--lin);cursor:pointer" onclick="ficha('${p.id}')"><span class="pp ${melhorPos(p)}">${melhorPos(p)}</span><span class="grow trunc">${esc(p.n)}</span><span class="mut">${din(valor(p))}</span><span class="ovr">${ovr(p)}</span></div>`).join("")||`<span class="mut">Abra a ficha de um jogador no Elenco pra colocá-lo à venda. Propostas chegam ao longo das rodadas.</span>`}</div>`;
   }
-  const cx=G.cl[G.clubeId].cx;
+  const cx=G.cl[G.clubeId].cx, jn=janela();
   let ps=Object.values(G.jog).filter(p=>p.c!==G.clubeId&&(!UI.mercPos||p.pos[UI.mercPos]!==undefined));
   if(UI.mercPago) ps=ps.filter(p=>preco(p)<=cx);
   ps.sort(UI.mercOrd==="ovr"?(a,b)=>ovr(b)-ovr(a):UI.mercOrd==="pot"?(a,b)=>b.pot-a.pot||a.a-b.a:(a,b)=>a.a-b.a||ovr(b)-ovr(a));
   ps=ps.slice(0,60);
-  return chips+`<div class="card"><div class="row" style="flex-wrap:wrap;margin-bottom:8px"><select onchange="UI.mercPos=this.value;render()"><option value="">Todas as posições</option>${POS.map(k=>`<option value="${k}" ${UI.mercPos===k?"selected":""}>${POS_NOME[k]}</option>`).join("")}</select><select onchange="UI.mercOrd=this.value;render()"><option value="ovr" ${UI.mercOrd==="ovr"?"selected":""}>Melhores</option><option value="pot" ${UI.mercOrd==="pot"?"selected":""}>Maior potencial</option><option value="idade" ${UI.mercOrd==="idade"?"selected":""}>Mais jovens</option></select><label class="row" style="gap:4px;font-size:13px"><input type="checkbox" ${UI.mercPago?"checked":""} onchange="UI.mercPago=this.checked;render()"> cabe no caixa</label></div>
+  return chips+`<div class="card" style="border-color:${jn.aberta?"var(--ok)":"var(--bad)"}"><b>${textoJanela()}</b><div class="mut" style="font-size:13px">Janelas: rodadas 1–5 e 12–14. Fora delas não dá pra comprar nem vender (só por eventos).</div></div><div class="card"><div class="row" style="flex-wrap:wrap;margin-bottom:8px"><select onchange="UI.mercPos=this.value;render()"><option value="">Todas as posições</option>${POS.map(k=>`<option value="${k}" ${UI.mercPos===k?"selected":""}>${POS_NOME[k]}</option>`).join("")}</select><select onchange="UI.mercOrd=this.value;render()"><option value="ovr" ${UI.mercOrd==="ovr"?"selected":""}>Melhores</option><option value="pot" ${UI.mercOrd==="pot"?"selected":""}>Maior potencial</option><option value="idade" ${UI.mercOrd==="idade"?"selected":""}>Mais jovens</option></select><label class="row" style="gap:4px;font-size:13px"><input type="checkbox" ${UI.mercPago?"checked":""} onchange="UI.mercPago=this.checked;render()"> cabe no caixa</label></div>
   <table><tr><th>Pos</th><th>Jogador</th><th class="n">Id</th><th class="n">OVR</th><th class="right">Pedida</th></tr>${ps.map(p=>`<tr class="clk" onclick="ficha('${p.id}')"><td><span class="pp ${melhorPos(p)}">${melhorPos(p)}</span></td><td><div class="trunc" style="max-width:170px">${esc(p.n)}</div><div class="mut trunc" style="font-size:11px;max-width:170px">${esc(CL[p.c].c)} · ${G.div[p.c]}</div></td><td class="n">${p.a}</td><td class="n ovr">${ovr(p)}</td><td class="right ${preco(p)>cx?"mut":""}">${din(preco(p))}</td></tr>`).join("")}</table>${ps.length?"":`<p class="mut">Ninguém com esse filtro.</p>`}</div>`;
 }
 
@@ -1321,7 +1381,7 @@ function telaFim(){
   return `<div class="heroi">${crest(R.clube,72)}<h1 style="font-size:34px;margin-top:8px">FIM DA TEMPORADA ${R.ano}</h1><p>${esc(c.n)} terminou em <b class="ac">${R.pos}º</b> na ${DIV_NOME[R.div]}</p>${dest}${mov}</div>
   <div class="card"><h3>Diretoria</h3><div class="kv"><span>Objetivo: ${R.objetivo}</span><b class="${R.bateu?"pos":"neg"}">${R.bateu?"cumprido":"não cumprido"}</b></div><div class="kv"><span>Copa do Brasil</span><b>${esc(R.minhaCopa||"—")}</b></div>${(R.diretrizes||[]).map(d=>`<div class="kv"><span>${d.ic} ${esc(d.txt)}</span><b class="${d.ok?"pos":"neg"}">${d.ok?"✓":"✗"}</b></div>`).join("")}<div class="kv"><span>Reputação</span><b class="${R.rep<0?"neg":"pos"}">${R.rep>0?"+":""}${R.rep}</b></div>${R.linhas.map(l=>`<div class="kv"><span>${l[0]}</span><b class="pos">${din(l[1])}</b></div>`).join("")}</div>
   <div class="card"><h3>Campeões</h3>${R.copa?`<div class="kv"><span>Copa do Brasil</span><b>${esc(CL[R.copa].c)}</b></div>`:""}${DIVS.map(d=>`<div class="kv"><span>${DIV_NOME[d]}</span><b>${esc(CL[R.campeoes[d]].c)}</b></div>`).join("")}</div>
-  <div class="card"><h3>Elenco</h3><p>🌱 Subiram da base: ${R.jovens.map(esc).join(", ")}</p>${R.aposentados.length?`<p>👋 Penduraram as chuteiras: ${R.aposentados.map(esc).join(", ")}</p>`:""}</div>
+  <div class="card"><h3>Elenco</h3><p>🌱 Subiram da base: ${R.jovens.map(esc).join(", ")}</p>${(R.saidas||[]).length?`<p>📄 Contrato encerrado, saíram de graça: ${R.saidas.map(esc).join(", ")}</p>`:""}${(R.livres||[]).length?`<p>🆓 A diretoria completou o elenco com jogadores livres: ${R.livres.map(esc).join(", ")}</p>`:""}${R.aposentados.length?`<p>👋 Penduraram as chuteiras: ${R.aposentados.map(esc).join(", ")}</p>`:""}</div>
   ${R.demitido?`<div class="card" style="border-color:var(--bad)"><h3 class="neg">Você foi demitido</h3><p>Escolha onde recomeçar:</p>${R.propostas.map(id=>`${cartaoProposta(id)}<p class="mut" style="font-size:13px;font-style:italic;margin:4px 0 8px">“${esc(sabor(id))}”</p>`).join("")}</div>`:
     `${R.propostas.length?`<div class="card" style="border-color:var(--ok)"><h3>Propostas de emprego</h3>${R.propostas.map(id=>`${cartaoProposta(id)}<p class="mut" style="font-size:13px;font-style:italic;margin:4px 0 8px">“${esc(sabor(id))}”</p>`).join("")}</div>`:""}<button class="pri" style="width:100%" onclick="novaTemporada()">Começar a temporada ${R.ano+1} ▶</button>`}`;
 }
