@@ -199,9 +199,9 @@ function valor(p){ const o=ovr(p); let v=2e6*Math.exp((o-84)*.25)*fatorIdade(p.a
 function salario(p){ return Math.max(300,Math.round(7000*Math.exp((ovr(p)-84)*.17)/10)*10); }
 const disponivel = p => p.les===0 && p.sus===0;
 const elenco = cid => G.el[cid].map(id=>G.jog[id]);
-function novoJogador(cid,pos,o,idade,pot){
-  const id="g"+(G.seq++);
-  const p={id,n:nomeMisto(),c:cid,a:idade,nat:"BRA",pos:{[pos]:clamp(Math.round(o),25,97)},d:0,pot:0,cond:100,mor:60,les:0,sus:0,am:0,st:{j:0,g:0,a:0,ns:0}};
+function novoJogador(cid,pos,o,idade,pot,nat){
+  const id="g"+(G.seq++); nat=nat||"Brasil";
+  const p={id,n:nomeDoPais(nat),c:cid,a:idade,nat,pos:{[pos]:clamp(Math.round(o),25,97)},d:0,pot:0,cond:100,mor:60,les:0,sus:0,am:0,st:{j:0,g:0,a:0,ns:0}};
   p.pot=pot!==undefined?pot:(idade<=23?clamp(p.pos[pos]+ri(2,10),0,97):p.pos[pos]);
   p.ct=idade<=18?3:ri(1,3); if(cid===G.clubeId) p.sal=salario(p);
   G.jog[id]=p; G.el[cid].push(id); return p;
@@ -407,8 +407,13 @@ const SUCESSO_BASE=[.55,.63,.72,.81,.9], INTERVALO_BASE=[[7,9],[6,8],[5,7],[4,6]
 const maxBase = () => (G.cl[G.clubeId].base||1)+1;
 function rotuloPot(j){ const f=forca(G.clubeId), d=j.pot-f; return d>=10?["joia","💎 Joia rara"]:d>=4?["promessa","⭐ Grande promessa"]:d>=-2?["bom","👍 Bom potencial"]:["aposta","🎲 Aposta"]; }
 /* ---------- promessas reais da base e nomes misturados ---------- */
-// primeiro nome + sobrenome sorteados entre os jogadores reais das páginas de elenco do Dugout
-function nomeMisto(){ const N=D.nomes||{}; return N.primeiros&&N.primeiros.length&&N.sobrenomes.length?pick(N.primeiros)+" "+pick(N.sobrenomes):String.fromCharCode(65+ri(0,25))+". "+pick(SOBRENOMES); }
+// primeiro nome + sobrenome sorteados entre jogadores reais do Dugout DO MESMO PAÍS (base: só brasileiros)
+function nomeDoPais(pais){ const N=(D.nomes||{})[pais]; return N?pick(N.p)+" "+pick(N.s):String.fromCharCode(65+ri(0,25))+". "+pick(SOBRENOMES); }
+const nomeBR = () => nomeDoPais("Brasil");
+function sortearPais(){ const ps=Object.keys(D.nomes||{}).filter(k=>k!=="Brasil"); return ps.length?sortearPeso(ps,k=>D.nomes[k].peso):"Brasil"; }
+// bandeira como imagem (emoji de bandeira vira "BR"/"LT" no Windows); cai no emoji se a imagem falhar
+const bandeiraTxt = nat => (D.bandeiras||{})[nat]||"";
+function bandeira(nat,larg){ const iso=(D.iso||{})[nat]; if(!iso) return bandeiraTxt(nat); const w=larg||18; return `<img src="https://flagcdn.com/w${w>40?80:40}/${iso}.png" width="${w}" height="${Math.round(w*.7)}" style="vertical-align:middle;border-radius:2px;object-fit:cover" alt="${esc(nat)}" onerror="this.replaceWith(document.createTextNode('${bandeiraTxt(nat)}'))">`; }
 const PROM={}; let PROM_PCT={};
 function prepararPromessas(){
   (D.promessas||[]).forEach(j=>{ PROM[j.id]=j; AT[j.id]=j.at; });
@@ -418,7 +423,7 @@ function prepararPromessas(){
 }
 function promessasInit(){
   if(G.promPool) return; G.promPool={};
-  (D.promessas||[]).forEach(j=>{ if(G.jog[j.id]) return; (G.promPool[j.t]=G.promPool[j.t]||[]).push(j.id); });
+  (D.promessas||[]).forEach(j=>{ if(G.jog[j.id]||j.nat!=="Brasil") return; (G.promPool[j.t]=G.promPool[j.t]||[]).push(j.id); }); // base: só brasileiros
 }
 function promessaReal(){
   promessasInit(); const pool=G.promPool[G.clubeId]; if(!pool||!pool.length) return null;
@@ -436,7 +441,7 @@ function gerarJovem(lvl,tipo){
   const ovr0=Math.round(clamp(f-(tipo==="peneira"?ri(28,34):24-lvl*2-ri(0,6)),30,90));
   let pot=ovr0+10+ri(0,6+lvl*3); if(rnd()<.08+lvl*.02) pot+=8;
   const rebeldeExplode=ment.id==="rebelde"?rnd()<.5:null;
-  return {id:"b"+(G.seq++),n:nomeMisto(),a:ri(15,17),pos:pick(arq.pos),ovr:ovr0,pot:clamp(pot,0,97),arq:arq.id,ment:ment.id,rebx:rebeldeExplode,olh:pick(OLHEIROS)};
+  return {id:"b"+(G.seq++),n:nomeBR(),nat:"Brasil",a:ri(15,17),pos:pick(arq.pos),ovr:ovr0,pot:clamp(pot,0,97),arq:arq.id,ment:ment.id,rebx:rebeldeExplode,olh:pick(OLHEIROS)};
 }
 function proxRevelacao(){ const iv=INTERVALO_BASE[(G.cl[G.clubeId].base||1)-1]; return ri(iv[0],iv[1]); }
 function verificarBase(){
@@ -452,7 +457,7 @@ function verificarBase(){
 }
 function cartaoJovem(j,acoes){
   const a=ARQUETIPOS.find(x=>x.id===j.arq), m=MENTALIDADES.find(x=>x.id===j.ment), [, rot]=rotuloPot(j);
-  return `<div class="card" style="margin-bottom:8px"><div class="row"><span class="pp ${j.pos}">${j.pos}</span><b class="grow">${esc(j.n)} <span class="mut" style="font-weight:500">${j.a} anos${j.nat?" · "+esc(j.nat):""}</span></b><span class="ovr">${j.ovr}</span></div>
+  return `<div class="card" style="margin-bottom:8px"><div class="row"><span class="pp ${j.pos}">${j.pos}</span><b class="grow">${esc(j.n)} <span class="mut" style="font-weight:500">${j.a} anos${j.nat?" · "+bandeira(j.nat)+" "+esc(j.nat):""}</span></b><span class="ovr">${j.ovr}</span></div>
   <div style="margin-top:6px"><span class="tag">${a.e} ${a.n}</span><span class="tag">${m.e} ${m.n}</span><span class="tag">${rot}</span></div>${acoes||""}</div>`;
 }
 function abrirRevelacao(id){
@@ -1374,7 +1379,7 @@ function fimTemporada(){
     if(roqueiro?p.a>=45:(p.a>=38||(p.a>=36&&rnd()<.4))){
       G.el[p.c]=G.el[p.c].filter(x=>x!==id); delete G.jog[id];
       if(meu){ R.aposentados.push(p.n); G.xi=G.xi.map(x=>x===id?null:x); }
-      else novoJogador(p.c,melhorPos(p),p.pos[melhorPos(p)]-ri(0,5),ri(19,24)); // "regen" mantém o nível do clube
+      else novoJogador(p.c,melhorPos(p),p.pos[melhorPos(p)]-ri(0,5),ri(19,24),undefined,rnd()<.7?"Brasil":sortearPais()); // "regen" mantém o nível do clube (≈70% brasileiros, como no DO-BR)
     }
   }
   while(G.el[eu].length<16){ const p=novoJogador(eu,pick(POS),forca(eu)-ri(8,14),ri(22,30)); R.livres=(R.livres||[]).concat(p.n); }
@@ -1384,7 +1389,7 @@ function fimTemporada(){
   // emprego
   if(G.conf<20){ R.demitido=true; G.tec.rep=clamp(G.tec.rep-4,5,100); }
   G.div=nova; G.temp++; G.ano++; MEMO={};
-  Object.keys(G.cl).forEach(completarElenco);
+  Object.keys(G.cl).forEach(id=>completarElenco(id));
   iniciarTemporada();
   const minha=exigencia(eu);
   if(R.demitido){ let op=clubesInteressados(3,G.tec.rep-4); if(op.length<3) op=Object.keys(G.cl).filter(id=>id!==eu).sort((a,b)=>exigencia(a)-exigencia(b)).slice(0,3); R.propostas=op; }
@@ -1444,7 +1449,17 @@ function comecar(){
   if(localStorage.getItem(SAVE_KEY)&&!confirm("Já existe uma carreira salva. Começar outra apaga a anterior. Continuar?")) return;
   UI.nome=n; UI.divEsc=UI.sug?CL[UI.sug].div:"CB"; UI.tela="escolha"; render();
 }
-function continuar(){ try{ G=JSON.parse(localStorage.getItem(SAVE_KEY)); MEMO={}; contratosInit(); UI.tela=G.resumo?"fim":"jogo"; UI.aba="inicio"; render(); }catch(e){ toast("Save corrompido."); } }
+// reparo de saves da versão que inchava os elencos na virada de temporada (forEach passando o índice como alvo)
+function repararElencos(){
+  let removidos=0;
+  for(const cid of Object.keys(G.el)){
+    const teto=cid===G.clubeId?26:22; if(G.el[cid].length<=26) continue;
+    const gerados=G.el[cid].map(id=>G.jog[id]).filter(p=>p&&/^g/.test(p.id)&&!G.xi.includes(p.id)).sort((a,b)=>ovr(a)-ovr(b));
+    while(G.el[cid].length>teto&&gerados.length){ const p=gerados.shift(); G.el[cid]=G.el[cid].filter(x=>x!==p.id); delete G.jog[p.id]; removidos++; }
+  }
+  if(removidos){ MEMO={}; noticia(`🧹 Ajuste de elencos: ${removidos} jogadores gerados em excesso foram removidos.`); }
+}
+function continuar(){ try{ G=JSON.parse(localStorage.getItem(SAVE_KEY)); MEMO={}; contratosInit(); repararElencos(); UI.tela=G.resumo?"fim":"jogo"; UI.aba="inicio"; render(); }catch(e){ toast("Save corrompido."); } }
 function telaEscolha(){
   const cs=D.clubes.filter(c=>c.div===UI.divEsc).sort((a,b)=>FORCA0[b.id]-FORCA0[a.id]);
   return `<h2 style="margin:8px 0">Escolha seu clube</h2><div class="chips">${DIVS.map(d=>`<span class="chip ${d===UI.divEsc?"on":""}" onclick="UI.divEsc='${d}';render()">${d==="CB"?"Brasileirão":d}</span>`).join("")}</div>
@@ -1536,7 +1551,7 @@ function ficha(pid){
     const pr=preco(p), bl=G.bloq[pid]>G.di, cheio=G.el[G.clubeId].length>=26, jn=janela();
     acoes=`<h3 style="margin-top:14px">Negociar · pedida ${din(pr)}</h3>${p.c===C_QP?`<p class="ac" style="font-size:13px">🦴 O Quebra Perna dificilmente libera alguém.</p>`:""}${grandeDemais(p)?`<p class="ac" style="font-size:13px">⚠️ Ele acha seu clube pequeno demais para o nível dele. Só uma oferta alta convence.</p>`:""}${!jn.aberta?`<p class="neg">${textoJanela()}.</p>`:bl?`<p class="neg">O ${esc(CL[p.c].c)} encerrou as conversas por enquanto.</p>`:cheio?`<p class="neg">Elenco cheio (26). Abra espaço antes de contratar.</p>`:[[.85,"Oferta baixa"],[1,"Oferta justa"],[1.2,"Oferta alta"]].map(([f,l])=>{ const v=Math.round(pr*f/1000)*1000, ch=chanceCompra(p,f); return `<button style="width:100%;margin-bottom:6px;text-transform:none" ${G.cl[G.clubeId].cx<v?"disabled":""} onclick="ofertar('${pid}',${f})">${l}: ${din(v)} — ${Math.round(ch*100)}% de chance</button>`; }).join("")}`;
   }
-  modal(`<div class="row"><div style="width:64px;height:64px;border-radius:50%;background:#0d1729 url('${kitUrl(p.c)}') center 12%/cover;border:2px solid var(--lin);flex:none"></div><div class="grow"><h2>${esc(p.n)}</h2><div class="mut">${p.a} anos · ${p.nat} · ${crest(p.c,18)} ${esc(CL[p.c].c)}</div></div><div class="center"><div class="ovr ac" style="font-size:34px">${ovr(p)}</div><div class="mut" style="font-size:11px">${p.a<=23?"pot. "+p.pot:"overall"}</div></div></div>
+  modal(`<div class="row"><div style="width:64px;height:64px;border-radius:50%;background:#0d1729 url('${kitUrl(p.c)}') center 12%/cover;border:2px solid var(--lin);flex:none"></div><div class="grow"><h2>${esc(p.n)}</h2><div class="mut">${p.a} anos · ${bandeira(p.nat)} ${esc(p.nat)} · ${crest(p.c,18)} ${esc(CL[p.c].c)}</div></div><div class="center"><div class="ovr ac" style="font-size:34px">${ovr(p)}</div><div class="mut" style="font-size:11px">${p.a<=23?"pot. "+p.pot:"overall"}</div></div></div>
   <div style="margin:10px 0">${POS.filter(k=>p.pos[k]!==undefined).map(k=>`<span class="pp ${k}">${k} ${clamp(p.pos[k]+p.d,1,99)}</span>`).join(" ")}</div>
   <div class="kv"><span>Valor</span><b>${din(valor(p))}</b></div><div class="kv"><span>Salário por jogo</span><b>${din(salDe(p))}</b></div>
   <div class="kv"><span>Temporada</span><b>${p.st.j} jogos · ${p.st.g} gols · ${p.st.a} assist.${p.st.j?" · nota "+(p.st.ns/p.st.j).toFixed(2):""}</b></div>
@@ -1572,6 +1587,46 @@ function escolherVaga(i){
 }
 function porNaVaga(i,pid){ const em=G.xi.indexOf(pid); if(em>=0) G.xi[em]=G.xi[i]; G.xi[i]=pid; fecharModal(); salvar(); render(); }
 
+/* ---------- mercado internacional (estrangeiros com nome do próprio país) ---------- */
+const FATOR_DIV_INTL={3:1,2:.75,1:.5}; // estrangeiro hesita em vir pra divisão menor
+function intlAtual(){
+  const jn=janela(); if(!jn.aberta) return null;
+  const key=G.temp+"-"+jn.ate+"-"+G.clubeId;
+  if(G.intlKey!==key){ G.intlKey=key; const f=forca(G.clubeId); G.intl=Array.from({length:30},()=>{ const nat=sortearPais(), a=ri(19,33), o=clamp(Math.round(f+ri(-12,6)),45,95); return {id:"x"+(G.seq++),n:nomeDoPais(nat),nat,pos:pick(POS),o,a,pot:a<=23?clamp(o+ri(2,9),0,97):o}; }); }
+  return G.intl;
+}
+const comoJogador = x => ({id:x.id,pos:{[x.pos]:x.o},d:0,a:x.a,pot:x.pot,c:null});
+const precoIntl = x => Math.round(valor(comoJogador(x))*1.35*(G.tec.gestao==="Analítico"?.92:1)/1000)*1000; // 35% de taxa de importação
+function chanceIntl(x,f){ let c=f<1?.25:f===1?.65:.95; c*=FATOR_DIV_INTL[tier(G.div[G.clubeId])]; if(x.o>forca(G.clubeId)+8) c*=f>1?.6:.2; return c; }
+function fichaIntl(id){
+  const x=(G.intl||[]).find(y=>y.id===id); if(!x) return;
+  const pr=precoIntl(x), t=tier(G.div[G.clubeId]);
+  modal(`<div class="row"><div style="flex:none">${bandeira(x.nat,56)||"🌍"}</div><div class="grow"><h2 style="text-transform:none">${esc(x.n)}</h2><div class="mut">${x.a} anos · ${esc(x.nat)} · <span class="pp ${x.pos}">${x.pos}</span></div></div><div class="center"><div class="ovr ac" style="font-size:34px">${x.o}</div><div class="mut" style="font-size:11px">${x.a<=23?"pot. ~"+x.pot:"overall"}</div></div></div>
+  <div class="kv"><span>Valor de mercado</span><b>${din(valor(comoJogador(x)))}</b></div><div class="kv"><span>Pedida (com taxa de importação)</span><b>${din(pr)}</b></div>
+  ${t<3?`<p class="ac" style="font-size:13px">⚠️ Jogar ${t===2?"a Série B":"a Série C"} no Brasil não é o sonho dele. Convencer é mais difícil.</p>`:""}
+  ${G.el[G.clubeId].length>=26?`<p class="neg">Elenco cheio (26).</p>`:[[.85,"Oferta baixa"],[1,"Oferta justa"],[1.2,"Oferta alta"]].map(([f,l])=>{ const v=Math.round(pr*f/1000)*1000; return `<button class="op" ${G.cl[G.clubeId].cx<v?"disabled":""} onclick="ofertarIntl('${x.id}',${f})"><span class="pct">${Math.round(chanceIntl(x,f)*100)}%</span>${l}: ${din(v)}</button>`; }).join("")}
+  <button style="width:100%;margin-top:6px" onclick="fecharModal()">Fechar</button>`);
+}
+function ofertarIntl(id,f){
+  const x=(G.intl||[]).find(y=>y.id===id); if(!x) return;
+  const v=Math.round(precoIntl(x)*f/1000)*1000, c=G.cl[G.clubeId];
+  if(!janela().aberta) return toast("Janela de transferências fechada.");
+  if(c.cx<v) return toast("Caixa insuficiente."); if(G.el[G.clubeId].length>=26) return toast("Elenco cheio.");
+  G.intl=G.intl.filter(y=>y.id!==id);
+  if(rnd()<chanceIntl(x,f)){
+    c.cx-=v; G.fin.transf-=v;
+    const p=novoJogador(G.clubeId,x.pos,x.o,x.a,x.pot,x.nat); p.n=x.n; p.sal=Math.round(salario(p)*1.1/10)*10; p.ct=ri(2,4); p.mor=55; MEMO={};
+    noticia(`🌍 ${p.n} (${bandeiraTxt(x.nat)} ${x.nat}) é o novo reforço internacional, por ${din(v)}.`); fecharModal(); salvar(); render(); toast(`${p.n} contratado!`);
+  } else { noticia(`🌍 ${x.n} recusou a proposta e vai continuar na Europa.`); fecharModal(); salvar(); render(); toast("Proposta recusada — ele saiu da lista."); }
+}
+function abaIntl(chips){
+  const lst=intlAtual();
+  if(!lst) return chips+`<div class="card" style="border-color:var(--bad)"><b>${textoJanela()}</b><div class="mut" style="font-size:13px">A lista de estrangeiros disponíveis é renovada a cada janela de transferências.</div></div>`;
+  const cx=G.cl[G.clubeId].cx; let ps=lst.filter(x=>!UI.mercPos||x.pos===UI.mercPos).sort((a,b)=>b.o-a.o);
+  return chips+`<div class="card" style="border-color:var(--ok)"><b>🌍 ${lst.length} estrangeiros disponíveis nesta janela</b><div class="mut" style="font-size:13px">Pedida inclui 35% de taxa de importação. Quem recusa sai da lista.</div></div>
+  <div class="card"><div class="row" style="margin-bottom:8px"><select onchange="UI.mercPos=this.value;render()"><option value="">Todas as posições</option>${POS.map(k=>`<option value="${k}" ${UI.mercPos===k?"selected":""}>${POS_NOME[k]}</option>`).join("")}</select></div>
+  <table><tr><th>Pos</th><th>Jogador</th><th class="n">Id</th><th class="n">OVR</th><th class="right">Pedida</th></tr>${ps.map(x=>`<tr class="clk" onclick="fichaIntl('${x.id}')"><td><span class="pp ${x.pos}">${x.pos}</span></td><td><div class="trunc" style="max-width:170px">${bandeira(x.nat)} ${esc(x.n)}</div><div class="mut" style="font-size:11px">${esc(x.nat)}</div></td><td class="n">${x.a}</td><td class="n ovr">${x.o}</td><td class="right ${precoIntl(x)>cx?"mut":""}">${din(precoIntl(x))}</td></tr>`).join("")}</table></div>`;
+}
 /* ---------- mercado ---------- */
 function ehTitular(p){ return xiAuto(p.c).some(x=>x.pid===p.id); }
 function preco(p){ return Math.round(valor(p)*(ehTitular(p)?1.6:1.15)*(G.tec.gestao==="Analítico"?.92:1)/1000)*1000; }
@@ -1604,7 +1659,8 @@ function responderOferta(i,aceita){
   salvar(); render();
 }
 function abaMercado(){
-  const chips=`<div class="chips"><span class="chip ${UI.mercAba==="comprar"?"on":""}" onclick="UI.mercAba='comprar';render()">Comprar</span><span class="chip ${UI.mercAba==="vender"?"on":""}" onclick="UI.mercAba='vender';render()">Vender${G.ofertas.length?" ("+G.ofertas.length+")":""}</span></div>`;
+  const chips=`<div class="chips"><span class="chip ${UI.mercAba==="comprar"?"on":""}" onclick="UI.mercAba='comprar';render()">Nacional</span><span class="chip ${UI.mercAba==="intl"?"on":""}" onclick="UI.mercAba='intl';render()">🌍 Internacional</span><span class="chip ${UI.mercAba==="vender"?"on":""}" onclick="UI.mercAba='vender';render()">Vender${G.ofertas.length?" ("+G.ofertas.length+")":""}</span></div>`;
+  if(UI.mercAba==="intl") return abaIntl(chips);
   if(UI.mercAba==="vender"){
     const lst=Object.keys(G.venda).map(id=>G.jog[id]).filter(Boolean);
     return chips+`<div class="card"><h3>Propostas recebidas</h3>${G.ofertas.map((o,i)=>{ const p=G.jog[o.pid]; return `<div style="padding:8px 0;border-bottom:1px solid var(--lin)"><div class="row">${crest(o.clube,26)}<div class="grow"><b>${esc(p.n)}</b> <span class="mut">(${melhorPos(p)} ${ovr(p)}, vale ${din(valor(p))})</span><div class="mut" style="font-size:13px">${esc(CL[o.clube].n)} oferece <b class="pos">${din(o.valor)}</b></div></div></div><div class="row" style="margin-top:6px"><button class="sm pri grow" onclick="responderOferta(${i},true)">Aceitar</button>${o.final?"":`<button class="sm grow" onclick="pedirMais(${i})">Pedir mais</button>`}<button class="sm grow" onclick="responderOferta(${i},false)">Recusar</button></div>${o.final?`<div class="ac" style="font-size:12px;margin-top:4px">Oferta final: é pegar ou largar.</div>`:""}<div></div></div>`; }).join("")||`<span class="mut">Nenhuma proposta no momento.</span>`}</div>
@@ -1616,7 +1672,7 @@ function abaMercado(){
   ps.sort(UI.mercOrd==="ovr"?(a,b)=>ovr(b)-ovr(a):UI.mercOrd==="pot"?(a,b)=>b.pot-a.pot||a.a-b.a:(a,b)=>a.a-b.a||ovr(b)-ovr(a));
   ps=ps.slice(0,60);
   return chips+`<div class="card" style="border-color:${jn.aberta?"var(--ok)":"var(--bad)"}"><b>${textoJanela()}</b><div class="mut" style="font-size:13px">Janelas: rodadas 1–5 e 12–14. Fora delas não dá pra comprar nem vender (só por eventos).</div></div><div class="card"><div class="row" style="flex-wrap:wrap;margin-bottom:8px"><select onchange="UI.mercPos=this.value;render()"><option value="">Todas as posições</option>${POS.map(k=>`<option value="${k}" ${UI.mercPos===k?"selected":""}>${POS_NOME[k]}</option>`).join("")}</select><select onchange="UI.mercOrd=this.value;render()"><option value="ovr" ${UI.mercOrd==="ovr"?"selected":""}>Melhores</option><option value="pot" ${UI.mercOrd==="pot"?"selected":""}>Maior potencial</option><option value="idade" ${UI.mercOrd==="idade"?"selected":""}>Mais jovens</option></select><label class="row" style="gap:4px;font-size:13px"><input type="checkbox" ${UI.mercPago?"checked":""} onchange="UI.mercPago=this.checked;render()"> cabe no caixa</label></div>
-  <table><tr><th>Pos</th><th>Jogador</th><th class="n">Id</th><th class="n">OVR</th><th class="right">Pedida</th></tr>${ps.map(p=>`<tr class="clk" onclick="ficha('${p.id}')"><td><span class="pp ${melhorPos(p)}">${melhorPos(p)}</span></td><td><div class="trunc" style="max-width:170px">${esc(p.n)}</div><div class="mut trunc" style="font-size:11px;max-width:170px">${esc(CL[p.c].c)} · ${G.div[p.c]}</div></td><td class="n">${p.a}</td><td class="n ovr">${ovr(p)}</td><td class="right ${preco(p)>cx?"mut":""}">${din(preco(p))}</td></tr>`).join("")}</table>${ps.length?"":`<p class="mut">Ninguém com esse filtro.</p>`}</div>`;
+  <table><tr><th>Pos</th><th>Jogador</th><th class="n">Id</th><th class="n">OVR</th><th class="right">Pedida</th></tr>${ps.map(p=>`<tr class="clk" onclick="ficha('${p.id}')"><td><span class="pp ${melhorPos(p)}">${melhorPos(p)}</span></td><td><div class="trunc" style="max-width:170px">${bandeira(p.nat)} ${esc(p.n)}</div><div class="mut trunc" style="font-size:11px;max-width:170px">${esc(CL[p.c].c)} · ${G.div[p.c]}</div></td><td class="n">${p.a}</td><td class="n ovr">${ovr(p)}</td><td class="right ${preco(p)>cx?"mut":""}">${din(preco(p))}</td></tr>`).join("")}</table>${ps.length?"":`<p class="mut">Ninguém com esse filtro.</p>`}</div>`;
 }
 
 /* ---------- clube ---------- */

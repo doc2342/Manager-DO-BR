@@ -5,6 +5,8 @@ Uso: python gerar_dados.py   (lê ../FenomenoDOBR, escreve dados.json nesta past
 """
 import csv, io, json, os, re, unicodedata
 
+from paises import PAISES, pais_pt
+
 FONTE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "FenomenoDOBR")
 
 ATRIBUTOS = ["Reflexes", "One on ones", "Handling", "Communication", "Positioning",
@@ -60,22 +62,57 @@ def ovr_na_posicao(at, pos):
 
 def jogador_do_elenco(j, cid):
     pos = POS_ELENCO[j["pos"]]
-    return {"id": j["id"], "n": j["n"], "t": cid, "a": j["a"], "nat": j["nat"], "pos": {pos: ovr_na_posicao(j["at"], pos)},
+    return {"id": j["id"], "n": j["n"], "t": cid, "a": j["a"], "nat": pais_pt(j["nat"]), "pos": {pos: ovr_na_posicao(j["at"], pos)},
             "at": [j["at"].get(a, 0) for a in ATRIBUTOS]}
 
 
-def nomes_da_base(elencos):
-    """Primeiros nomes e sobrenomes de todos os jogadores das páginas, pra misturar nos gerados."""
-    primeiros, sobrenomes = set(), set()
+PARTICULAS = {"da", "de", "do", "dos", "das", "di", "van", "von", "der", "den", "del", "la", "le", "dal", "dos"}
+MIN_JOGADORES_PAIS = 12  # países com menos gente que isso não têm nome suficiente pra misturar
+
+
+def separar_nome(nome):
+    """'Ailton da Guia' -> ('Ailton', 'da Guia'); 'C.Machado' -> (None, 'Machado')."""
+    nome = nome.strip()
+    if " " not in nome:
+        partes = [p for p in re.split(r"\.", nome) if p]
+        return None, (partes[-1] if partes and len(partes[-1]) >= 3 else None)
+    partes = nome.split()
+    primeiro = partes[0] if len(partes[0]) >= 3 and "." not in partes[0] else None
+    sobrenome = partes[-1]
+    if len(partes) >= 3 and partes[-2].lower() in PARTICULAS:
+        sobrenome = partes[-2].lower() + " " + partes[-1]
+    return primeiro, (sobrenome if len(partes[-1]) >= 3 else None)
+
+
+def nomes_por_pais(elencos):
+    """Bases de nomes separadas: brasileiros (base, gerados) e cada país estrangeiro (mercado internacional)."""
+    por_pais = {}
     for js in elencos.values():
         for j in js:
-            partes = re.split(r"[ .]+", j["n"].strip())
-            partes = [p for p in partes if p]
-            if " " in j["n"].strip() and len(partes[0]) >= 3:
-                primeiros.add(partes[0])
-            if len(partes[-1]) >= 3:
-                sobrenomes.add(partes[-1])
-    return sorted(primeiros), sorted(sobrenomes)
+            pais = pais_pt(j["nat"])
+            p, s = separar_nome(j["n"])
+            d = por_pais.setdefault(pais, {"p": set(), "s": set(), "n": 0})
+            d["n"] += 1
+            if p:
+                d["p"].add(p)
+            if s:
+                d["s"].add(s)
+    saida = {}
+    for pais, d in por_pais.items():
+        # "Ademirda" (de "Ademir da Silva" escrito junto): descarta se sem o "da/de/do" vira outro nome existente
+        d["p"] = {p for p in d["p"] if not (p[-2:] in ("da", "de", "do") and p[:-2] in d["p"])}
+        if d["n"] >= MIN_JOGADORES_PAIS and len(d["p"]) >= 5 and len(d["s"]) >= 5:
+            saida[pais] = {"p": sorted(d["p"]), "s": sorted(d["s"]), "peso": d["n"]}
+    return saida
+
+
+def iso_da_bandeira(b):
+    """🇱🇹 -> 'lt' (pros arquivos de bandeira); Inglaterra/Escócia usam os códigos gb-eng/gb-sct."""
+    if "󠁥" in b:
+        return "gb-eng"
+    if "󠁳" in b:
+        return "gb-sct"
+    return "".join(chr(ord(ch) - 0x1F1E6 + ord("a")) for ch in b if 0x1F1E6 <= ord(ch) <= 0x1F1FF)
 
 
 def ler(nome):
@@ -110,12 +147,12 @@ def main():
             pos[p] = o - (0 if nivel == "Natural" else PENALIDADE_COMPETENT)
         jogadores.append({
             "id": j["id"], "n": j["nome"], "t": j["idTime"], "a": idade.get(j["id"], 27),
-            "nat": j.get("pais") or "BRA", "pos": pos,
+            "nat": pais_pt(j.get("pais") or "BRA"), "pos": pos,
             "at": [j["atributos"].get(a, 0) for a in ATRIBUTOS],
         })
 
     # reservas e promessas reais (elencos_completos.json, gerado por extrair_elencos.py)
-    reservas, promessas, primeiros, sobrenomes = [], [], [], []
+    reservas, promessas, nomes = [], [], {}
     caminho_el = os.path.join(os.path.dirname(os.path.abspath(__file__)), "elencos_completos.json")
     if os.path.exists(caminho_el):
         with io.open(caminho_el, encoding="utf-8") as f:
@@ -142,13 +179,14 @@ def main():
                     usados.add(j["id"]); pr = jogador_do_elenco(j, c["id"])
                     pr["ops"] = sum(j["at"].get(x, 0) for x in OPS[next(iter(pr["pos"]))])  # bruto: o jogo compara com outros da mesma idade
                     promessas.append(pr)
-        primeiros, sobrenomes = nomes_da_base(elencos)
+        nomes = nomes_por_pais(elencos)
 
     saida = {"atributos": ATRIBUTOS, "clubes": clubes, "jogadores": jogadores, "reservas": reservas,
-             "promessas": promessas, "nomes": {"primeiros": primeiros, "sobrenomes": sobrenomes}}
+             "promessas": promessas, "nomes": nomes, "bandeiras": {pt: b for pt, b in PAISES.values()}, "iso": {pt: iso_da_bandeira(b) for pt, b in PAISES.values()}}
     with io.open("dados.json", "w", encoding="utf-8") as f:
         json.dump(saida, f, ensure_ascii=False, separators=(",", ":"))
-    print(len(reservas), "reservas,", len(promessas), "promessas,", len(primeiros), "nomes,", len(sobrenomes), "sobrenomes")
+    br = nomes.get("Brasil", {"p": [], "s": []})
+    print(len(reservas), "reservas,", len(promessas), "promessas; nomes BR:", len(br["p"]), "x", len(br["s"]), "; países estrangeiros com nomes:", len(nomes) - 1)
     print(len(clubes), "clubes,", len(jogadores), "jogadores,", sum(1 for c in clubes if c["pres"]), "presidentes ->", os.path.getsize("dados.json") // 1024, "KB")
 
 
