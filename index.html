@@ -201,7 +201,7 @@ const disponivel = p => p.les===0 && p.sus===0;
 const elenco = cid => G.el[cid].map(id=>G.jog[id]);
 function novoJogador(cid,pos,o,idade,pot){
   const id="g"+(G.seq++);
-  const p={id,n:String.fromCharCode(65+ri(0,25))+". "+pick(SOBRENOMES),c:cid,a:idade,nat:"BRA",pos:{[pos]:clamp(Math.round(o),25,97)},d:0,pot:0,cond:100,mor:60,les:0,sus:0,am:0,st:{j:0,g:0,a:0,ns:0}};
+  const p={id,n:nomeMisto(),c:cid,a:idade,nat:"BRA",pos:{[pos]:clamp(Math.round(o),25,97)},d:0,pot:0,cond:100,mor:60,les:0,sus:0,am:0,st:{j:0,g:0,a:0,ns:0}};
   p.pot=pot!==undefined?pot:(idade<=23?clamp(p.pos[pos]+ri(2,10),0,97):p.pos[pos]);
   p.ct=idade<=18?3:ri(1,3); if(cid===G.clubeId) p.sal=salario(p);
   G.jog[id]=p; G.el[cid].push(id); return p;
@@ -269,12 +269,13 @@ function novoJogo(nome,clubeId){
   G={v:1,tec:{nome,rep:30,hist:[],tit:[]},clubeId,temp:1,ano:2026,seq:1,jog:{},el:{},cl:{},div:{},news:[],venda:{},ofertas:[],bloq:{},conf:60,form:"4-4-2",ment:"N",xi:[],ultimo:null,resumo:null,evento:null,playoff:null,fin:{}};
   MEMO={};
   D.clubes.forEach(c=>{ G.div[c.id]=c.div; G.el[c.id]=[]; });
-  D.jogadores.forEach(j=>{
+  D.jogadores.concat(D.reservas||[]).forEach(j=>{
     const pos=Object.assign({},j.pos), best=Math.max(...Object.values(pos));
     G.jog[j.id]={id:j.id,n:j.n,c:j.t,a:j.a,nat:j.nat,pos,d:0,pot:j.a<=23?clamp(best+ri(2,10),0,97):best,cond:100,mor:60,les:0,sus:0,am:0,st:{j:0,g:0,a:0,ns:0},real:1,ct:ri(1,4)};
     G.el[j.t].push(j.id);
   });
   D.clubes.forEach(c=>{ G.cl[c.id]={cx:0,cap:c.cap,ct:1,base:1,enf:0,fis:0,perf:0,form:pick(Object.keys(FORM)),pat:0}; });
+  promessasInit();
   D.clubes.forEach(c=>completarElenco(c.id));
   D.clubes.forEach(c=>{ const t=tier(c.div); G.cl[c.id].cx=Math.round({3:8e6,2:3.5e6,1:1.2e6}[t]*(.7+rnd()*.6)/1e4)*1e4; });
   iniciarTemporada();
@@ -405,18 +406,43 @@ const FALHAS_BASE=["O garoto se machucou nos testes e não pôde ser avaliado.",
 const SUCESSO_BASE=[.55,.63,.72,.81,.9], INTERVALO_BASE=[[7,9],[6,8],[5,7],[4,6],[3,5]];
 const maxBase = () => (G.cl[G.clubeId].base||1)+1;
 function rotuloPot(j){ const f=forca(G.clubeId), d=j.pot-f; return d>=10?["joia","💎 Joia rara"]:d>=4?["promessa","⭐ Grande promessa"]:d>=-2?["bom","👍 Bom potencial"]:["aposta","🎲 Aposta"]; }
+/* ---------- promessas reais da base e nomes misturados ---------- */
+// primeiro nome + sobrenome sorteados entre os jogadores reais das páginas de elenco do Dugout
+function nomeMisto(){ const N=D.nomes||{}; return N.primeiros&&N.primeiros.length&&N.sobrenomes.length?pick(N.primeiros)+" "+pick(N.sobrenomes):String.fromCharCode(65+ri(0,25))+". "+pick(SOBRENOMES); }
+const PROM={}; let PROM_PCT={};
+function prepararPromessas(){
+  (D.promessas||[]).forEach(j=>{ PROM[j.id]=j; AT[j.id]=j.at; });
+  // garoto de 15 com atributo baixo não é pior que um de 18: compara o OPS ajustado pela idade
+  const adj=j=>j.ops+(18-j.a)*14, ord=(D.promessas||[]).slice().sort((a,b)=>adj(a)-adj(b));
+  ord.forEach((j,i)=>PROM_PCT[j.id]=ord.length>1?i/(ord.length-1):.5);
+}
+function promessasInit(){
+  if(G.promPool) return; G.promPool={};
+  (D.promessas||[]).forEach(j=>{ if(G.jog[j.id]) return; (G.promPool[j.t]=G.promPool[j.t]||[]).push(j.id); });
+}
+function promessaReal(){
+  promessasInit(); const pool=G.promPool[G.clubeId]; if(!pool||!pool.length) return null;
+  const id=pool.splice(ri(0,pool.length-1),1)[0], j=PROM[id]; if(!j) return null;
+  const pct=PROM_PCT[id]===undefined?.5:PROM_PCT[id], f=forca(G.clubeId), pos=Object.keys(j.pos)[0];
+  const ovr0=Math.round(clamp(f-30+pct*20+(j.a-15)*2,30,90));
+  let pot=Math.round(f-6+pct*16+ri(-3,6)); if(pct>.9&&rnd()<.4) pot+=5;
+  const arq=pick(ARQUETIPOS.filter(a=>a.pos.includes(pos))), ment=sortearPeso(MENTALIDADES,m=>m.p);
+  return {id:"b"+(G.seq++),real:id,n:j.n,a:j.a,nat:j.nat,pos,ovr:ovr0,pot:clamp(Math.max(pot,ovr0+6),0,97),arq:arq.id,ment:ment.id,rebx:ment.id==="rebelde"?rnd()<.5:null,olh:pick(OLHEIROS)};
+}
+const restamPromessas = () => { promessasInit(); return (G.promPool[G.clubeId]||[]).length; };
 function gerarJovem(lvl,tipo){
+  const real=promessaReal(); if(real) return real;
   const arq=pick(ARQUETIPOS), ment=sortearPeso(MENTALIDADES,m=>m.p), f=forca(G.clubeId);
   const ovr0=Math.round(clamp(f-(tipo==="peneira"?ri(28,34):24-lvl*2-ri(0,6)),30,90));
   let pot=ovr0+10+ri(0,6+lvl*3); if(rnd()<.08+lvl*.02) pot+=8;
   const rebeldeExplode=ment.id==="rebelde"?rnd()<.5:null;
-  return {id:"b"+(G.seq++),n:String.fromCharCode(65+ri(0,25))+". "+pick(SOBRENOMES),a:ri(15,17),pos:pick(arq.pos),ovr:ovr0,pot:clamp(pot,0,97),arq:arq.id,ment:ment.id,rebx:rebeldeExplode,olh:pick(OLHEIROS)};
+  return {id:"b"+(G.seq++),n:nomeMisto(),a:ri(15,17),pos:pick(arq.pos),ovr:ovr0,pot:clamp(pot,0,97),arq:arq.id,ment:ment.id,rebx:rebeldeExplode,olh:pick(OLHEIROS)};
 }
 function proxRevelacao(){ const iv=INTERVALO_BASE[(G.cl[G.clubeId].base||1)-1]; return ri(iv[0],iv[1]); }
 function verificarBase(){
   G.basej=G.basej||[]; if(G.proxRev===undefined) G.proxRev=proxRevelacao();
   // garotos da base evoluem devagar enquanto esperam a promoção
-  G.basej.forEach(j=>{ const m=j.ment==="dedicado"?1.5:j.ment==="rebelde"?(j.rebx?2:.3):1; if(j.ovr<j.pot&&rnd()<.08*m*(1+.1*G.cl[G.clubeId].ct)) j.ovr++; });
+  G.basej.forEach(j=>{ const m=j.ment==="dedicado"?1.5:j.ment==="rebelde"?(j.rebx?2:.3):1; if(j.ovr<j.pot&&rnd()<.1*m*(1+.1*G.cl[G.clubeId].ct)) j.ovr=Math.min(j.pot,j.ovr+1+Math.floor((j.pot-j.ovr)/15)); });
   if(--G.proxRev>0) return;
   G.proxRev=proxRevelacao();
   if(G.basej.length>=maxBase()) return;
@@ -426,7 +452,7 @@ function verificarBase(){
 }
 function cartaoJovem(j,acoes){
   const a=ARQUETIPOS.find(x=>x.id===j.arq), m=MENTALIDADES.find(x=>x.id===j.ment), [, rot]=rotuloPot(j);
-  return `<div class="card" style="margin-bottom:8px"><div class="row"><span class="pp ${j.pos}">${j.pos}</span><b class="grow">${esc(j.n)} <span class="mut" style="font-weight:500">${j.a} anos</span></b><span class="ovr">${j.ovr}</span></div>
+  return `<div class="card" style="margin-bottom:8px"><div class="row"><span class="pp ${j.pos}">${j.pos}</span><b class="grow">${esc(j.n)} <span class="mut" style="font-weight:500">${j.a} anos${j.nat?" · "+esc(j.nat):""}</span></b><span class="ovr">${j.ovr}</span></div>
   <div style="margin-top:6px"><span class="tag">${a.e} ${a.n}</span><span class="tag">${m.e} ${m.n}</span><span class="tag">${rot}</span></div>${acoes||""}</div>`;
 }
 function abrirRevelacao(id){
@@ -442,7 +468,8 @@ function abrirRevelacao(id){
 function promoverJovem(id){
   const j=(G.basej||[]).find(x=>x.id===id); if(!j) return;
   if(G.el[G.clubeId].length>=26) return toast("Elenco cheio (26).");
-  const p=novoJogador(G.clubeId,j.pos,j.ovr,j.a,j.pot); p.n=j.n; p.ment=j.ment; p.rebx=j.rebx; p.ct=3; p.base=1;
+  let p=novoJogador(G.clubeId,j.pos,j.ovr,j.a,j.pot); p.n=j.n; p.ment=j.ment; p.rebx=j.rebx; p.ct=3; p.base=1;
+  if(j.real&&!G.jog[j.real]){ const velho=p.id; delete G.jog[velho]; p.id=j.real; p.real=1; p.nat=j.nat||p.nat; G.jog[p.id]=p; G.el[G.clubeId]=G.el[G.clubeId].map(x=>x===velho?p.id:x); }
   G.basej=G.basej.filter(x=>x.id!==id); noticia(`⬆️ ${p.n} subiu da base para o time profissional.`);
   tecInit(); G.tec.promovidos=(G.tec.promovidos||0)+1; if(G.tec.promovidos>=3) conquistar("formador3");
   salvar(); render();
@@ -465,7 +492,7 @@ function verPeneira(){
 function aprovarPeneira(id){ const j=(G.peneira||[]).find(x=>x.id===id); if(!j||(G.basej||[]).length>=maxBase()) return; (G.basej=G.basej||[]).push(j); G.peneira=G.peneira.filter(x=>x.id!==id); salvar(); verPeneira(); }
 function abaBase(){
   G.basej=G.basej||[]; const c=G.cl[G.clubeId], lvl=c.base||1;
-  return `<div class="card"><div class="row"><div class="grow"><b>${OBRAS.base.e} Categorias de base · nível ${lvl}</b><div class="mut" style="font-size:13px">Vagas: ${G.basej.length}/${maxBase()} · sucesso nas revelações ${Math.round(SUCESSO_BASE[lvl-1]*100)}% · próxima em ~${Math.max(1,G.proxRev||0)} rodada(s)</div></div></div>
+  return `<div class="card"><div class="row"><div class="grow"><b>${OBRAS.base.e} Categorias de base · nível ${lvl}</b><div class="mut" style="font-size:13px">${restamPromessas()?`🏷️ ${restamPromessas()} garoto(s) da base real do clube ainda por aparecer · `:""}Vagas: ${G.basej.length}/${maxBase()} · sucesso nas revelações ${Math.round(SUCESSO_BASE[lvl-1]*100)}% · próxima em ~${Math.max(1,G.proxRev||0)} rodada(s)</div></div></div>
   <button style="width:100%;margin-top:8px;text-transform:none" ${G.peneiraTemp===G.temp?"disabled":""} onclick="abrirPeneira()">📣 Promover peneira na região — ${din(custoPeneira())}${G.peneiraTemp===G.temp?" (já feita nesta temporada)":""}</button></div>
   ${G.basej.map(j=>cartaoJovem(j,`<div class="row" style="margin-top:8px"><button class="sm pri grow" onclick="promoverJovem('${j.id}')">⬆️ Subir pro profissional</button><button class="sm per" onclick="dispensarJovem('${j.id}')">Dispensar</button></div>`)).join("")||`<div class="card mut">Nenhum garoto na base ainda. As revelações chegam ao longo da temporada — ou promova uma peneira.</div>`}`;
 }
@@ -1121,7 +1148,7 @@ function fecharData(resU){
     const jg=jogou.has(p.id);
     if(!jg){ if(p.sus>0&&resU) p.sus--; if(p.les>0) p.les--; p.mor=clamp(p.mor-(G.xi.includes(p.id)?0:.6),15,95); }
     p.cond=clamp(p.cond+(jg?12+perfBonus():26),0,100);
-    if(p.a<=24&&ovr(p)<p.pot&&rnd()<(.05+.025*eu.ct)*(jg?1.6:1)*(G.tec.gestao==="Formador"?1.4:1)*fatorMent(p)){ p.d++; if(ovr(p)>=80) noticia(`📈 ${p.n} evoluiu para ${ovr(p)} de overall.`); }
+    if(p.a<=24&&ovr(p)<p.pot&&rnd()<(.05+.025*eu.ct)*(jg?1.6:1)*(G.tec.gestao==="Formador"?1.4:1)*fatorMent(p)){ p.d+=p.a<=21?Math.min(p.pot-ovr(p),1+Math.floor((p.pot-ovr(p))/15)):1; if(ovr(p)>=80) noticia(`📈 ${p.n} evoluiu para ${ovr(p)} de overall.`); }
   });
   if(eu.cx<0) mudarConf(-2,"fin");
   G.abs=(G.abs||0)+1; estruturaInit(eu); concluirObras(); verificarBase(); processarRenovacoes(false);
@@ -1514,7 +1541,7 @@ function ficha(pid){
   <div class="kv"><span>Valor</span><b>${din(valor(p))}</b></div><div class="kv"><span>Salário por jogo</span><b>${din(salDe(p))}</b></div>
   <div class="kv"><span>Temporada</span><b>${p.st.j} jogos · ${p.st.g} gols · ${p.st.a} assist.${p.st.j?" · nota "+(p.st.ns/p.st.j).toFixed(2):""}</b></div>
   ${meu?`<div class="kv"><span>Condição / Moral</span><b>${Math.round(p.cond)}% / ${Math.round(p.mor)}</b></div>`:""}
-  ${at?`<h3 style="margin-top:14px">Atributos (Dugout, 1–50)</h3><div class="attr">${D.atributos.map((a,i)=>`<div><span class="mut">${ATR_PT[a]}</span><b>${at[i]}</b></div>`).join("")}</div>`:`<p class="mut" style="font-size:13px">Jogador da base/regenerado — sem ficha no Dugout.</p>`}
+  ${at?`<h3 style="margin-top:14px">Atributos (Dugout, 1–50)</h3><div class="attr">${D.atributos.map((a,i)=>`<div><span class="mut">${ATR_PT[a]}</span><b>${at[i]}</b></div>`).join("")}</div>`:`<p class="mut" style="font-size:13px">Jogador gerado pelo jogo — sem ficha no Dugout.</p>`}
   ${meu?blocoContrato(p):""}${acoes}<button style="width:100%;margin-top:10px" onclick="fecharModal()">Fechar</button>`);
 }
 function alternarVenda(pid){ if(G.venda[pid]) delete G.venda[pid]; else G.venda[pid]=1; salvar(); render(); ficha(pid); }
@@ -1764,6 +1791,7 @@ async function boot(){
   D.clubes.forEach(c=>CL[c.id]=c);
   const porClube={};
   D.jogadores.forEach(j=>{ AT[j.id]=j.at; (porClube[j.t]=porClube[j.t]||[]).push(Math.max(...Object.values(j.pos))); });
+  (D.reservas||[]).forEach(j=>AT[j.id]=j.at); prepararPromessas();
   D.clubes.forEach(c=>{ const v=(porClube[c.id]||[30]).sort((a,b)=>b-a).slice(0,11); FORCA0[c.id]=v.reduce((s,x)=>s+x,0)/v.length; });
   document.getElementById("modal").addEventListener("click",e=>{ if(e.target.id==="modal"&&!UI.modalFixo) fecharModal(); });
   render();
