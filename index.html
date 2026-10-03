@@ -111,6 +111,8 @@ tr.z1 td:first-child{box-shadow:inset 3px 0 var(--ok)}tr.z2 td:first-child{box-s
 .estilo.on{border-color:var(--ok);background:rgba(61,220,132,.12)}
 .estilo small{display:block;font-family:Barlow,sans-serif;font-weight:500;font-size:13px;color:var(--mut)}
 nav a{font-size:12px}
+.tri{gap:6px}.tri button{flex:1 1 0;min-width:0;padding:10px 4px;font-size:15px;white-space:nowrap}
+@media(max-width:340px){.tri button{font-size:12px;padding:9px 1px;letter-spacing:0}}
 .res-gol{font-family:"Barlow Condensed",sans-serif;font-weight:800;font-size:28px;text-align:center}
 .heroi{text-align:center;padding:26px 8px}
 .heroi h1{font-size:44px;line-height:1}
@@ -578,6 +580,7 @@ function registrarDesempenho(r,gm,ga){
   tecInit(); const S=G.st, T=G.tec.tot, res=gm>ga?"V":gm<ga?"D":"E";
   for(const o of [S,T]){ o.j++; o[res==="V"?"v":res==="D"?"d":"e"]++; o.gp+=gm; o.gc+=ga; }
   S.ult.push(res); if(S.ult.length>10) S.ult.shift();
+  if(UI.lote) UI.loteRes.push({r:res,gm,ga,adv:r.casa===G.clubeId?r.fora:r.casa,comp:r.comp});
   S.seqV=res==="V"?S.seqV+1:0; S.seqInv=res==="D"?0:S.seqInv+1;
   conquistar("estreia"); if(res==="V") conquistar("vitoria");
   if(gm-ga>=4) conquistar("goleada");
@@ -832,7 +835,7 @@ function criarPartida(j){
     return {id:cid,user,ment:user?G.ment:"N",subs:0,fin:0,posse:0,entraram:new Set(xi.map(x=>x.pid)),
       jog:xi.map(s=>({pid:s.pid,pos:s.pos,cond:user?G.jog[s.pid].cond:100,nota:6.2+rnd()*.6,am:0,out:false,les:false,g:0,as:0}))};
   };
-  M={j,min:0,fase:"1T",lados:[lado(j.casa),lado(j.fora)],gols:[0,0],ev:[],neutro:j.comp==="P",vac:null,pen:null,fim:false,pausa:true,vel:1,timer:null,todos:[],interativo:false,lances:0,decisao:null,foco:G.foco,festa:G.festa&&j.casa===G.clubeId};
+  M={j,min:0,fase:"1T",lados:[lado(j.casa),lado(j.fora)],gols:[0,0],ev:[],neutro:j.comp==="P",vac:null,pen:null,fim:false,pausa:true,vel:PREFS.vel,timer:null,todos:[],interativo:false,lances:0,decisao:null,foco:G.foco,festa:G.festa&&j.casa===G.clubeId};
   G.foco=null; G.festa=false; M.homero=ehHomero(j); M.freg=freguesia(j.casa,j.fora);
   M.lados.forEach(L=>L.jog.forEach(x=>M.todos.push(x)));
   evento(0,-1,"info",`Bola rolando no ${M.neutro?"campo neutro":CL[j.casa].est}!`);
@@ -984,6 +987,7 @@ function seguirDecisao(){
   M.decisao=null; fecharModal();
   if(M.fase==="PEN"){ proximaCobranca(); return; }
   if(M.fim){ atualizarPartida(); return; }
+  if(M.rapido) return correrRapido();
   M.pausa=false; atualizarPartida(); clearTimeout(M.timer); M.timer=setTimeout(loopPartida,400/M.vel);
 }
 // pênalti: célula 0-8 (linha 0 = alto). Chance de errar o alvo por célula; o goleiro só defende se pular na mesma coluna.
@@ -1132,10 +1136,11 @@ function fecharData(resU){
     UI.tela="jogo"; UI.aba="inicio";
     if(quebrou){ demitir("💸 Foram 24 rodadas seguidas no vermelho. O conselho encerrou seu ciclo por gestão financeira."); }
     else if(G.conf<15&&G.di>=8){ demitir(); }
-    else if(rnd()<.3) G.evento=sortearEvento();
+    else if(!UI.lote&&rnd()<.3) G.evento=sortearEvento(); // no lote não há eventos: só quem joga rodada a rodada decide
   }
+  if(UI.lote) return;
   salvar(); render();
-  if(G.di<G.cal.length&&UI.tela==="jogo"&&!G.demitido) mostrarRelatorio();
+  if(G.di<G.cal.length&&UI.tela==="jogo"&&!G.demitido&&PREFS.rel) mostrarRelatorio();
 }
 function mercadoIA(){
   if(!janela().aberta){ if(G.ofertas.length) noticia("🔴 A janela fechou. Propostas pendentes caducaram."); G.ofertas=[]; return; }
@@ -1444,8 +1449,10 @@ function abaInicio(){
     <div class="mut center" style="margin:8px 0;font-size:13px">${j.comp==="P"?"Campo neutro · vale vaga no Brasileirão":(casa?"🏠 Em casa · ":"✈️ Fora · ")+esc(CL[j.casa].est)}</div>
     ${previaJogo(j)}
     ${ok?"":`<div class="neg center" style="margin-bottom:8px">⚠️ Escalação incompleta ou com jogador indisponível.</div>`}
-    <div class="row"><button class="pri grow" onclick="jogar(false)">▶ Jogar</button><button class="grow" onclick="jogar(true)">⏩ Simular</button></div></div>`;
-  } else prox=`<div class="card"><h3>${dataLabel(d)}</h3><p class="mut">Seu clube não joga nesta data.</p><button class="pri" style="width:100%" onclick="fecharData(null)">Avançar ▶</button></div>`;
+    <div class="row tri"><button class="pri" onclick="jogar(false)">▶ Ao vivo</button><button onclick="jogar('lances')">⚡ Lances</button><button onclick="jogar(true)">⏩ Simular</button></div>
+    <button class="sm" style="width:100%;margin-top:6px" onclick="abrirLote()">⏭ Simular várias rodadas…</button>
+    <div class="mut" style="font-size:12px;margin-top:6px">⚡ Lances: o jogo corre na hora e só para nas suas decisões.</div></div>`;
+  } else prox=`<div class="card"><h3>${dataLabel(d)}</h3><p class="mut">Seu clube não joga nesta data.</p><button class="pri" style="width:100%" onclick="fecharData(null)">Avançar ▶</button><button class="sm" style="width:100%;margin-top:6px" onclick="abrirLote()">⏭ Simular várias rodadas…</button></div>`;
   const ev=G.evento!==null&&G.evento!==undefined?`<div class="card" style="border-color:var(--ac)"><h3>⚡ ${CAT_EV[EVENTOS[G.evento].cat]||"Decisão"}</h3><p>${EVENTOS[G.evento].t}</p>${EVENTOS[G.evento].ops.map((o,i)=>`<button style="width:100%;margin-bottom:6px;text-transform:none" onclick="escolherEvento(${i})">${o.l}</button>`).join("")}</div>`:"";
   const venc=G.di>=G.cal.length/2?elenco(G.clubeId).filter(p=>p.ct<=1).length:0;
   const avisoCt=venc?`<div class="card" style="border-color:var(--ac)"><div class="row"><div class="grow">📄 <b>${venc}</b> jogador(es) no último ano de contrato.</div><button class="sm" onclick="UI.elAba='contratos';irAba('elenco')">Ver</button></div></div>`:"";
@@ -1593,6 +1600,10 @@ function abaClube(){
   <div class="kv"><span>Capacidade</span><b>${c.cap.toLocaleString("pt-BR")}</b></div><div class="kv"><span>Público esperado hoje</span><b>${pub.toLocaleString("pt-BR")}${pub>=c.cap?" (lotado)":""}</b></div><div class="kv"><span>Ingresso</span><b>R$ ${PRECO_ING[tier(G.div[G.clubeId])]}</b></div>
   ${(()=>{ const o=obrasDoClube().find(x=>x.k==="cap"); return o?`<div class="ac" style="margin-top:8px">🏗️ Ampliação em obras: fica pronta em ${o.fim-G.abs} rodada(s).</div>`:`<button style="width:100%;margin-top:8px;text-transform:none" ${c.cx<CUSTO_ARQ||!podeObra()?"disabled":""} onclick="ampliar()">Ampliar +5.000 lugares — ${din(CUSTO_ARQ)} · ${DUR_ARQ} rodadas</button>`; })()}${pub<c.cap?`<div class="mut" style="font-size:12px;margin-top:4px">O estádio ainda não lota: ampliar agora não rende. Subir na tabela (ou de divisão) aumenta a procura.</div>`:""}</div>
   <div class="card"><h3>Estrutura</h3><div class="mut" style="font-size:12px;margin-bottom:4px">Obras desta temporada: ${obrasNaTemporada()}/${MAX_OBRAS_TEMP}. Cada uma leva algumas rodadas para ficar pronta.</div>${Object.keys(OBRAS).map(k=>{ const ob=obrasDoClube().find(o=>o.k===k); return `<div style="padding:7px 0;border-bottom:1px solid var(--lin)"><div class="row"><div class="grow"><b>${OBRAS[k].e} ${OBRAS[k].n}</b> · nível ${c[k]}/${OBRAS[k].max}<div class="mut" style="font-size:12px">${OBRAS[k].d}</div>${k==="enf"||k==="fis"||k==="perf"?`<div class="mut" style="font-size:11px">Departamento médico</div>`:""}</div>${ob?`<span class="ac" style="font-size:13px;text-align:right">🏗️ ${ob.fim-G.abs} rod.</span>`:c[k]>=OBRAS[k].max?`<span class="pos">máx.</span>`:`<button class="sm" ${c.cx<custoObra(k)||!podeObra()?"disabled":""} onclick="obra('${k}')">${din(custoObra(k))}<br><span style="font-size:11px;font-weight:500">${OBRAS[k].dur} rodadas</span></button>`}</div></div>`; }).join("")}</div>
+  <div class="card"><h3>⚙️ Preferências</h3>
+  <label class="row" style="gap:8px;padding:5px 0"><input type="checkbox" ${PREFS.rel?"checked":""} onchange="alternarPref('rel')"> Mostrar o resumo depois de cada rodada</label>
+  <label class="row" style="gap:8px;padding:5px 0"><input type="checkbox" ${PREFS.autoEsc?"checked":""} onchange="alternarPref('autoEsc')"> Escalar automaticamente ao simular várias rodadas</label>
+  <div class="mut" style="font-size:12px">Velocidade da partida ao vivo: ${PREFS.vel}x (muda no botão durante o jogo e fica salva).</div></div>
   <div class="card"><h3>Finanças da temporada</h3><div class="kv"><span>Patrocínio</span><b class="pos">${din(F.pat)}</b></div><div class="kv"><span>Bilheteria</span><b class="pos">${din(F.bil)}</b></div><div class="kv"><span>Premiações</span><b class="pos">${din(F.prem)}</b></div><div class="kv"><span>Transferências</span><b class="${F.transf<0?"neg":"pos"}">${din(F.transf)}</b></div><div class="kv"><span>Salários</span><b class="neg">${din(-F.sal)}</b></div><div class="kv"><span>Obras</span><b class="neg">${din(-F.obras)}</b></div><div class="mut" style="font-size:12px;margin-top:6px">Por jogo: patrocínio ${din(c.pat)} · folha ${din(folha(G.clubeId))}</div></div>
   <button class="per" style="width:100%" onclick="if(confirm('Voltar à tela inicial? A carreira continua salva.')){UI.tela='capa';render()}">Sair para a tela inicial</button>`;
 }
@@ -1609,21 +1620,69 @@ function abaMundo(){
   <div class="card"><h3>Copa do Brasil</h3>${copa}</div>`;
 }
 
+/* ---------- ritmo: preferências, modo "só os lances" e simulação em lote ---------- */
+const PREFS_KEY="manager_dobr_prefs";
+const PREFS=(()=>{ const pad={vel:2,rel:true,autoEsc:true}; try{ return Object.assign(pad,JSON.parse(localStorage.getItem(PREFS_KEY)||"{}")); }catch(e){ return pad; } })();
+function salvarPrefs(){ try{ localStorage.setItem(PREFS_KEY,JSON.stringify(PREFS)); }catch(e){} }
+function alternarPref(k){ PREFS[k]=!PREFS[k]; salvarPrefs(); render(); }
+// corre a partida instantaneamente até a próxima decisão, pausa (lesão/expulsão), intervalo pulado ou fim
+function correrRapido(){
+  if(!M||M.fim) return;
+  M.pausa=false; clearTimeout(M.timer);
+  while(!M.fim&&!M.decisao&&!M.pausa&&M.fase!=="PEN"){ if(M.fase==="INT") M.fase="2T"; tickPartida(); }
+  atualizarPartida();
+}
+const ALVOS_LOTE={n5:"Próximas 5 datas",copa:"Até o próximo jogo de Copa",turno:"Até o fim do turno (rodada 11)",fim:"Até o fim da temporada"};
+function abrirLote(){
+  modal(`<h3>⏭ Simular várias rodadas</h3><p class="mut" style="font-size:13px">Os jogos são simulados direto, sem eventos de escolha no caminho. Para no alvo, se você for demitido ou quando a temporada acabar.</p>
+  ${Object.keys(ALVOS_LOTE).map(k=>`<button class="op" onclick="simularLote('${k}')">${ALVOS_LOTE[k]}</button>`).join("")}
+  <label class="row" style="gap:8px;font-size:14px;margin:6px 0 10px"><input type="checkbox" ${PREFS.autoEsc?"checked":""} onchange="PREFS.autoEsc=this.checked;salvarPrefs()"> Escalar automaticamente antes de cada jogo (poupa quem está cansado)</label>
+  <button style="width:100%" onclick="fecharModal()">Cancelar</button>`);
+}
+function simularLote(alvo){
+  fecharModal();
+  if(G.evento!==null&&G.evento!==undefined){ toast("Responda a decisão pendente no Início antes de simular."); return irAba("inicio"); }
+  const temp0=G.temp, pos0=minhaPos(), cx0=G.cl[G.clubeId].cx, rod0=rodadaLiga(), clube0=G.clubeId; let n=0, motivo="";
+  UI.lote=true; UI.loteRes=[];
+  try{
+    while(n<40){
+      if(G.temp!==temp0||UI.tela==="fim"){ motivo="A temporada terminou."; break; }
+      if(G.demitido){ motivo="Você foi demitido."; break; }
+      if(G.evento!==null&&G.evento!==undefined){ motivo="Apareceu uma decisão para você."; break; }
+      if(alvo==="n5"&&n>=5){ motivo="5 datas simuladas."; break; }
+      if(alvo==="turno"&&rodadaLiga()>11&&rod0<=11){ motivo="Fim do turno."; break; }
+      if(alvo==="copa"&&n>0&&G.cal[G.di].t==="C"&&meuJogo()){ motivo="Chegou o jogo da Copa."; break; }
+      if(PREFS.autoEsc||!escalacaoOk()) autoEscalar();
+      if(meuJogo()) jogar(true); else fecharData(null);
+      fecharModal(); n++;
+    }
+  } finally { UI.lote=false; }
+  if(!motivo) motivo="Pausa de segurança.";
+  salvar(); render();
+  if(UI.tela==="fim"||G.demitido) return;
+  const res=UI.loteRes||[], v=res.filter(r=>r.r==="V").length, e=res.filter(r=>r.r==="E").length, d=res.filter(r=>r.r==="D").length, pos=minhaPos(), cx=G.cl[G.clubeId].cx;
+  modal(`<h3>⏭ ${n} data(s) simulada(s)</h3><p class="mut" style="font-size:13px">${esc(motivo)}</p>
+  <div class="nums" style="grid-template-columns:repeat(3,1fr)"><div><b class="pos">${v}</b><span>Vitórias</span></div><div><b>${e}</b><span>Empates</span></div><div><b class="neg">${d}</b><span>Derrotas</span></div></div>
+  <div style="margin:10px 0">${res.map(r=>`<div class="row" style="padding:3px 0;font-size:14px;border-bottom:1px solid var(--lin)"><span class="ult ${r.r}" style="width:22px;height:22px">${r.r}</span>${crest(r.adv,18)}<span class="grow trunc">${esc(CL[r.adv].c)} <span class="mut" style="font-size:12px">${r.comp==="C"?"Copa":r.comp==="P"?"Playoff":"Liga"}</span></span><b>${r.gm} × ${r.ga}</b></div>`).join("")||`<span class="mut">Seu time não jogou nessas datas.</span>`}</div>
+  ${clube0===G.clubeId?`<div class="kv"><span>Posição</span><b>${pos0}º → ${pos}º</b></div><div class="kv"><span>Caixa</span><b class="${cx-cx0<0?"neg":"pos"}">${din(cx0)} → ${din(cx)}</b></div>`:""}
+  <button class="pri" style="width:100%;margin-top:10px" onclick="fecharModal()">Ok</button>`);
+}
 /* ---------- partida ---------- */
 function jogar(simular){
   if(!escalacaoOk()){ toast("Arrume a escalação antes do jogo."); return irAba("tatica"); }
   const wo=woAmnesia(meuJogo());
   if(wo){ const fomos=G.clubeId===C_AMNESIA; noticia(fomos?"🫥 O presidente esqueceu de inscrever o time na Copa. W.O.: derrota por 20x0.":"🫥 O Amnésia esqueceu de inscrever o time! Vitória por W.O., 20x0."); conquistar("wo"); M=null; fecharData(wo); return; }
   criarPartida(meuJogo());
-  if(simular){ while(!M.fim){ if(M.fase==="INT") M.fase="2T"; tickPartida(); } return fecharData(M.res); }
+  if(simular===true){ while(!M.fim){ if(M.fase==="INT") M.fase="2T"; tickPartida(); } return fecharData(M.res); }
   M.interativo=true; UI.tela="partida"; render();
+  if(simular==="lances"){ M.rapido=true; correrRapido(); }
 }
 function telaPartida(){
   const j=M.j, d=G.cal[G.di];
   return `<div class="card"><div class="mut center" style="font-size:13px">${dataLabel(d)} · ${esc(M.neutro?"Campo neutro":CL[j.casa].est)} · ${climaAtual().e} ${climaAtual().n}</div>
   <div class="placar" style="margin-top:8px"><div class="tm">${crest(j.casa,48)}<div class="trunc">${esc(CL[j.casa].c)}</div></div><div class="gl" id="pl">0 - 0</div><div class="tm">${crest(j.fora,48)}<div class="trunc">${esc(CL[j.fora].c)}</div></div></div>
   <div id="relogio">0'</div><div id="stats" class="mut center" style="font-size:13px"></div></div>
-  <div class="card" id="ctrl"><div class="row" style="flex-wrap:wrap"><button class="pri grow" id="btnPausa" onclick="pausarOuSeguir()">▶ Começar</button><button class="sm" onclick="velocidade()" id="btnVel">1x</button><button class="sm" onclick="irAoFim()">⏭ Fim</button></div>
+  <div class="card" id="ctrl"><div class="row" style="flex-wrap:wrap"><button class="pri grow" id="btnPausa" onclick="pausarOuSeguir()">▶ Começar</button><button class="sm" onclick="velocidade()" id="btnVel">${M.vel}x</button><button class="sm" onclick="irAoFim()">⏭ Fim</button></div>
   <div class="row" style="margin-top:8px"><button class="sm grow" id="btnSub" onclick="abrirSubs()">🔁 Substituição</button><select id="selMent" onchange="mudarMentPartida(this.value)">${Object.keys(MENT).map(k=>`<option value="${k}" ${k===G.ment?"selected":""}>${MENT[k]}</option>`).join("")}</select></div></div>
   <div class="card"><div id="feed"></div></div><div class="card"><h3>Seu time</h3><div id="meutime"></div></div>`;
 }
@@ -1650,10 +1709,11 @@ function loopPartida(){
 function pausarOuSeguir(){
   if(M.fim||M.decisao||M.fase==="PEN") return;
   clearTimeout(M.timer);
+  if(M.rapido&&(M.pausa||M.fase==="INT")) return correrRapido();
   if(M.fase==="INT"){ M.fase="2T"; M.pausa=false; } else M.pausa=!M.pausa;
   atualizarPartida(); if(!M.pausa) M.timer=setTimeout(loopPartida,400/M.vel);
 }
-function velocidade(){ M.vel=M.vel===1?2:M.vel===2?4:1; atualizarPartida(); }
+function velocidade(){ M.vel=M.vel===1?2:M.vel===2?4:M.vel===4?8:1; PREFS.vel=M.vel; salvarPrefs(); atualizarPartida(); }
 function irAoFim(){ if(M.fim||M.decisao||M.fase==="PEN") return; M.interativo=false; clearTimeout(M.timer); while(!M.fim){ if(M.fase==="INT") M.fase="2T"; tickPartida(); } atualizarPartida(); }
 function mudarMentPartida(v){ G.ment=v; M.lados.find(L=>L.user).ment=v; }
 function abrirSubs(){
