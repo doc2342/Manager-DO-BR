@@ -524,10 +524,23 @@ function diretrizes(){
 }
 function nivelEstrutura(){ const c=G.cl[G.clubeId]; return c.ct+c.base+c.dm+c.cap/5000; }
 function iconeObjetivo(){ const tx=G.obj.txt; return /título/.test(tx)?"🏆":/acesso/.test(tx)?"⬆️":/top 5/.test(tx)?"📈":/rebaix|últimas/.test(tx)?"🛟":"⚖️"; }
+function avaliacaoAnterior(){
+  const h=G.tec.hist[G.tec.hist.length-1];
+  if(G.reuniaoNova||!h||h.clube!==G.clubeId||h.alvo===undefined) return "";
+  const dif=h.pos-h.alvo, pac=h.perfil==="Paciente";
+  const fala=dif<=-3?"Passou da conta. É assim que se trabalha aqui — e agora o sarrafo sobe.":
+    dif<=0?"Cumpriu o combinado. Gostei. Mas não se acomode.":
+    dif<=2?(pac?"Ficou perto. Dá pra evoluir, sigo confiando no projeto.":"Faltou pouco — e faltar é faltar. Não quero de novo."):
+    (pac?`Pedimos ${h.alvo}º e terminamos em ${h.pos}º. Vou ter paciência, mas o conselho está de olho.`:`Pedimos ${h.alvo}º, terminamos em ${h.pos}º. ${dif} posições abaixo. Inaceitável.`);
+  return `<div class="card" style="border-color:${dif<=0?"var(--ok)":"var(--bad)"}"><div class="mut" style="font-size:12px;letter-spacing:.08em">AVALIAÇÃO · TEMPORADA ${h.ano}</div>
+  <p style="font-style:italic;font-size:16px;margin:6px 0">“${esc(fala)}”</p>
+  <div class="row" style="gap:8px;flex-wrap:wrap"><span class="tag">${h.pos}º lugar</span><span class="tag">meta ${h.alvo}º</span>${h.v!==undefined?`<span class="tag">${h.v}V ${h.e}E ${h.d}D</span>`:""}${h.mov==="A"?`<span class="tag">⬆️ acesso</span>`:h.mov==="R"?`<span class="tag">⬇️ rebaixado</span>`:""}</div></div>`;
+}
 function telaReuniao(){
   const pr=presDe(G.clubeId), pf=PERFIS[pr.perfil], novo=G.reuniaoNova;
   return `<div class="pres"><div class="av">${pf.e}</div><div class="rot">${novo?"REUNIÃO INICIAL":"NOVA TEMPORADA"} · PRESIDENTE</div><h2 style="margin-top:4px;text-transform:none">${esc(pr.n)}</h2><div style="opacity:.85">${pr.perfil} · ${esc(nomeVisto(G.clubeId))}</div></div>
-  <div class="card discurso"><div class="mut" style="font-size:12px;font-style:normal;letter-spacing:.08em">DISCURSO DE ABERTURA</div>“${esc(pick(pf.fala))}”</div>
+  ${avaliacaoAnterior()}
+  <div class="card discurso"><div class="mut" style="font-size:12px;font-style:normal;letter-spacing:.08em">${G.reuniaoNova?"DISCURSO DE ABERTURA":"PALAVRA DO PRESIDENTE · "+G.ano}</div>“${esc(pick(pf.fala))}”</div>
   <h3>Missão da temporada ${G.ano}</h3>
   <div class="card missao"><div class="ic">${iconeObjetivo()}</div><div><b style="font-size:18px">${G.obj.txt}</b><div class="pos" style="font-size:14px;font-weight:600">Meta: ${G.obj.alvo}º lugar ou melhor</div><div class="mut" style="font-size:13px">${esc(pf.desc)}</div></div></div>
   ${tracosClube(G.clubeId).length?`<div class="card" style="border-color:var(--azul)"><div class="mut" style="font-size:12px;letter-spacing:.08em">🃏 PARTICULARIDADES DO CLUBE</div>${tracosClube(G.clubeId).map(t=>`<div style="padding:3px 0">${esc(t)}</div>`).join("")}</div>`:""}
@@ -557,11 +570,13 @@ function sabor(cid){
   return r<=3?"O favorito da chave. Ninguém aceita menos que o acesso — e o acesso abre todas as portas.":r<=8?"Um clube honesto num grupo embolado. Querem você para acabar com a fila.":"Pouca gente na arquibancada, nenhum dinheiro, nenhuma expectativa. Recomeço na raça.";
 }
 function definirObjetivo(){
-  const r=rankForca(G.clubeId), t=tier(G.div[G.clubeId]);
-  if(r<=2) G.obj={alvo:t===3?3:2,txt:t===3?"Brigar pelo título":"Conquistar o acesso"};
-  else if(r<=5) G.obj={alvo:5,txt:"Terminar na parte de cima (top 5)"};
-  else if(r<=9) G.obj={alvo:8,txt:"Campanha segura (top 8)"};
-  else G.obj={alvo:t===1?10:t===2?8:9,txt:t===1?"Fugir das últimas posições (top 10)":"Evitar o rebaixamento"};
+  const r=rankForca(G.clubeId), dv=G.div[G.clubeId], t=tier(dv);
+  let alvo=r<=2?(t===3?3:2):r<=5?5:r<=9?8:(t===1?10:t===2?8:9);
+  // quem superou a meta no mesmo clube e divisão não volta a ter meta frouxa: o sarrafo sobe
+  const h=G.tec&&G.tec.hist&&G.tec.hist[G.tec.hist.length-1];
+  if(h&&h.clube===G.clubeId&&h.div===dv) alvo=Math.min(alvo,Math.max(1,h.pos+2));
+  const topo=t===3?3:2;
+  G.obj=alvo<=topo?{alvo,txt:t===3?"Brigar pelo título":"Conquistar o acesso"}:alvo<=5?{alvo,txt:`Terminar na parte de cima (top ${alvo})`}:alvo<=8?{alvo,txt:`Campanha segura (top ${alvo})`}:{alvo,txt:t===1?`Fugir das últimas posições (top ${alvo})`:"Evitar o rebaixamento"};
   G.ini={cx:G.cl[G.clubeId].cx,est:nivelEstrutura()}; G.reunioes=0;
 }
 function classif(dv){ return Object.entries(G.tab[dv]).map(([id,r])=>Object.assign({id,sg:r.gp-r.gc},r)).sort((a,b)=>b.p-a.p||b.sg-a.sg||b.v-a.v||b.gp-a.gp||(a.id<b.id?-1:1)); }
@@ -1094,7 +1109,13 @@ function fimTemporada(){
   if(R.mov==="A") rep+=6; if(R.mov==="R"){ rep-=6; G.conf=clamp(G.conf-20,0,100); }
   if(G.copa.campeao===eu){ rep+=8; G.tec.tit.push(`Copa do Brasil ${G.ano} — ${CL[eu].n}`); }
   G.tec.rep=clamp(G.tec.rep+rep,5,100); R.rep=rep; R.fin=Object.assign({},G.fin);
-  tecInit(); G.tec.hist.push({temp:G.temp,ano:G.ano,clube:eu,div:dv,pos,mov:R.mov,copa:G.copa.minhaFase||"—",v:G.st.v,e:G.st.e,d:G.st.d});
+  tecInit(); G.tec.hist.push({temp:G.temp,ano:G.ano,clube:eu,div:dv,pos,mov:R.mov,copa:G.copa.minhaFase||"—",v:G.st.v,e:G.st.e,d:G.st.d,alvo:G.obj.alvo,perfil:presDe(eu).perfil});
+  const meusJog=elenco(eu);
+  R.st=Object.assign({},G.st);
+  R.artilheiros=meusJog.filter(p=>p.st.g>0).sort((a,b)=>b.st.g-a.st.g).slice(0,5).map(p=>[p.n,melhorPos(p),p.st.g]);
+  R.maisJogos=meusJog.slice().sort((a,b)=>b.st.j-a.st.j).slice(0,3).map(p=>[p.n,melhorPos(p),p.st.j]);
+  R.melhorNota=meusJog.filter(p=>p.st.j>=8).sort((a,b)=>b.st.ns/b.st.j-a.st.ns/a.st.j).slice(0,1).map(p=>[p.n,melhorPos(p),(p.st.ns/p.st.j).toFixed(2)])[0]||null;
+  R.tabela=cls[dv].map(id=>{ const x=G.tab[dv][id]; return [id,x.p,x.v,x.e,x.d,x.gp-x.gc]; });
   if(R.mov==="A") conquistar("acesso");
   if(pos===1){ conquistar(t===1?"titulo_c":t===2?"titulo_b":"brasileirao"); if(t===3&&G.tec.tit.filter(x=>/^Brasileirão/.test(x)).length>=3) conquistar("hegemonia"); }
   if(G.copa.campeao===eu){ conquistar("copa"); if(pos===1) conquistar("dobradinha"); }
@@ -1473,8 +1494,12 @@ function telaFim(){
   const mov=R.mov==="A"?`<div class="pos cond" style="font-size:22px">⬆ ACESSO para ${DIV_NOME[R.divNova]}</div>`:R.mov==="R"?`<div class="neg cond" style="font-size:22px">⬇ REBAIXADO para ${DIV_NOME[R.divNova]}</div>`:"";
   return `<div class="heroi">${crest(R.clube,72)}<h1 style="font-size:34px;margin-top:8px">FIM DA TEMPORADA ${R.ano}</h1><p>${esc(c.n)} terminou em <b class="ac">${R.pos}º</b> na ${DIV_NOME[R.div]}</p>${dest}${mov}</div>
   <div class="card"><h3>Diretoria</h3><div class="kv"><span>Objetivo: ${R.objetivo}</span><b class="${R.bateu?"pos":"neg"}">${R.bateu?"cumprido":"não cumprido"}</b></div><div class="kv"><span>Copa do Brasil</span><b>${esc(R.minhaCopa||"—")}</b></div>${(R.diretrizes||[]).map(d=>`<div class="kv"><span>${d.ic} ${esc(d.txt)}</span><b class="${d.ok?"pos":"neg"}">${d.ok?"✓":"✗"}</b></div>`).join("")}<div class="kv"><span>Reputação</span><b class="${R.rep<0?"neg":"pos"}">${R.rep>0?"+":""}${R.rep}</b></div>${R.linhas.map(l=>`<div class="kv"><span>${l[0]}</span><b class="pos">${din(l[1])}</b></div>`).join("")}</div>
+  ${R.st?`<div class="card"><h3>Sua campanha</h3><div class="nums"><div><b>${R.st.j}</b><span>Jogos</span></div><div><b class="pos">${R.st.v}</b><span>Vitórias</span></div><div><b>${R.st.e}</b><span>Empates</span></div><div><b class="neg">${R.st.d}</b><span>Derrotas</span></div><div><b class="ac">${R.st.j?Math.round((R.st.v*3+R.st.e)/(R.st.j*3)*100):0}%</b><span>Aproveit.</span></div></div><div class="mut" style="font-size:13px;margin-top:8px">${R.st.gp} gols marcados · ${R.st.gc} sofridos · saldo ${R.st.gp-R.st.gc>0?"+":""}${R.st.gp-R.st.gc} (todas as competições)</div>${R.st.ult&&R.st.ult.length?`<div style="margin-top:8px">${R.st.ult.map(r=>`<span class="ult ${r}">${r}</span>`).join("")}<span class="mut" style="font-size:12px">últimos jogos</span></div>`:""}</div>`:""}
+  ${R.artilheiros&&R.artilheiros.length?`<div class="card"><h3>⚽ Artilheiros do time</h3>${R.artilheiros.map((a,i)=>`<div class="kv"><span>${i+1}. <span class="pp ${a[1]}">${a[1]}</span> ${esc(a[0])}</span><b>${a[2]} gols</b></div>`).join("")}${R.melhorNota?`<div class="kv"><span>📈 Melhor nota: ${esc(R.melhorNota[0])}</span><b>${R.melhorNota[2]}</b></div>`:""}${R.maisJogos.map(a=>`<div class="kv" style="font-size:13px"><span class="mut">👕 ${esc(a[0])}</span><span class="mut">${a[2]} jogos</span></div>`).join("")}</div>`:""}
+  ${R.tabela?`<div class="card"><h3>Classificação final · ${DIV_NOME[R.div]}</h3><table>${CAB_TAB.replace('<th class="n">J</th>','')}${R.tabela.map((x,i)=>{ const z=R.div==="CB"?(i>=9?"z3":""):tier(R.div)===2?(i===0?"z1":i===1?"z2":i>=8?"z3":""):(i===0?"z1":""); return `<tr class="${z} ${x[0]===R.clube?"eu":""}"><td class="n">${i+1}</td><td><div class="row">${crest(x[0],18)}<span class="trunc">${esc(CL[x[0]].c)}</span></div></td><td class="n"><b>${x[1]}</b></td><td class="n">${x[2]}</td><td class="n">${x[3]}</td><td class="n">${x[4]}</td><td class="n">${x[5]>0?"+":""}${x[5]}</td></tr>`; }).join("")}</table></div>`:""}
+  ${R.fin?`<div class="card"><h3>💰 Balanço financeiro</h3><div class="kv"><span>Entradas (patrocínio, bilheteria, prêmios)</span><b class="pos">${din(R.fin.pat+R.fin.bil+R.fin.prem)}</b></div><div class="kv"><span>Salários e obras</span><b class="neg">${din(-(R.fin.sal+R.fin.obras))}</b></div><div class="kv"><span>Saldo de transferências</span><b class="${R.fin.transf<0?"neg":"pos"}">${din(R.fin.transf)}</b></div><div class="kv"><span>Caixa agora</span><b class="ac">${din(G.cl[R.clube].cx)}</b></div></div>`:""}
   <div class="card"><h3>Campeões</h3>${R.copa?`<div class="kv"><span>Copa do Brasil</span><b>${esc(CL[R.copa].c)}</b></div>`:""}${DIVS.map(d=>`<div class="kv"><span>${DIV_NOME[d]}</span><b>${esc(CL[R.campeoes[d]].c)}</b></div>`).join("")}</div>
-  <div class="card"><h3>Elenco</h3><p>🌱 Subiram da base: ${R.jovens.map(esc).join(", ")}</p>${(R.caricato||[]).map(t=>`<p>${esc(t)}</p>`).join("")}${(R.voltaram||[]).length?`<p>↩️ Voltaram de empréstimo: ${R.voltaram.map(esc).join(", ")}</p>`:""}${(R.saidas||[]).length?`<p>📄 Contrato encerrado, saíram de graça: ${R.saidas.map(esc).join(", ")}</p>`:""}${(R.livres||[]).length?`<p>🆓 A diretoria completou o elenco com jogadores livres: ${R.livres.map(esc).join(", ")}</p>`:""}${R.aposentados.length?`<p>👋 Penduraram as chuteiras: ${R.aposentados.map(esc).join(", ")}</p>`:""}</div>
+  <div class="card"><h3>Elenco</h3><p>🌱 Subiram da base: ${R.jovens.map(esc).join(", ")}</p>${(R.caricato||[]).map(t=>`<p>${esc(t)}</p>`).join("")}${(R.voltaram||[]).length?`<p>↩️ Voltaram de empréstimo: ${R.voltaram.map(esc).join(", ")}</p>`:""}${(R.saidas||[]).length?`<p>📄 Contrato encerrado, saíram de graça: ${R.saidas.map(esc).join(", ")}</p>`:""}${(()=>{ const v=G.el[R.clube]&&R.clube===G.clubeId?elenco(R.clube).filter(p=>p.ct<=1):[]; return v.length?`<p>⚠️ Entram no último ano de contrato: ${v.map(p=>esc(p.n)).join(", ")} — renove durante a temporada.</p>`:""; })()}${(R.livres||[]).length?`<p>🆓 A diretoria completou o elenco com jogadores livres: ${R.livres.map(esc).join(", ")}</p>`:""}${R.aposentados.length?`<p>👋 Penduraram as chuteiras: ${R.aposentados.map(esc).join(", ")}</p>`:""}</div>
   ${R.demitido?`<div class="card" style="border-color:var(--bad)"><h3 class="neg">${R.motivo?"Fim da linha":"Você foi demitido"}</h3>${R.motivo?`<p>${esc(R.motivo)}</p>`:""}<p>Escolha onde recomeçar:</p>${R.propostas.map(id=>`${cartaoProposta(id)}<p class="mut" style="font-size:13px;font-style:italic;margin:4px 0 8px">“${esc(sabor(id))}”</p>`).join("")}</div>`:
     `${R.propostas.length?`<div class="card" style="border-color:var(--ok)"><h3>Propostas de emprego</h3>${R.propostas.map(id=>`${cartaoProposta(id)}<p class="mut" style="font-size:13px;font-style:italic;margin:4px 0 8px">“${esc(sabor(id))}”</p>`).join("")}</div>`:""}<button class="pri" style="width:100%" onclick="novaTemporada()">Começar a temporada ${R.ano+1} ▶</button>`}`;
 }
