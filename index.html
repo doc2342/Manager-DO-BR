@@ -422,8 +422,9 @@ function prepararPromessas(){
   ord.forEach((j,i)=>PROM_PCT[j.id]=ord.length>1?i/(ord.length-1):.5);
 }
 function promessasInit(){
-  if(G.promPool) return; G.promPool={};
-  (D.promessas||[]).forEach(j=>{ if(G.jog[j.id]||j.nat!=="Brasil") return; (G.promPool[j.t]=G.promPool[j.t]||[]).push(j.id); }); // base: só brasileiros
+  if(G.promPool&&!G.promEstr){ G.promEstr=1; (D.promessas||[]).forEach(j=>{ if(j.nat==="Brasil"||G.jog[j.id]||(G.basej||[]).some(x=>x.real===j.id)) return; const f=(G.promPool[j.t]=G.promPool[j.t]||[]); if(!f.includes(j.id)) f.push(j.id); }); }
+  if(G.promPool) return; G.promPool={}; G.promEstr=1;
+  (D.promessas||[]).forEach(j=>{ if(G.jog[j.id]) return; (G.promPool[j.t]=G.promPool[j.t]||[]).push(j.id); }); // promessas reais de qualquer nacionalidade; só os garotos GERADOS têm nome brasileiro
 }
 function promessaReal(){
   promessasInit(); const pool=G.promPool[G.clubeId]; if(!pool||!pool.length) return null;
