@@ -272,7 +272,7 @@ function novoJogo(nome,clubeId){
     G.jog[j.id]={id:j.id,n:j.n,c:j.t,a:j.a,nat:j.nat,pos,d:0,pot:j.a<=23?clamp(best+ri(2,10),0,97):best,cond:100,mor:60,les:0,sus:0,am:0,st:{j:0,g:0,a:0,ns:0},real:1,ct:ri(1,4)};
     G.el[j.t].push(j.id);
   });
-  D.clubes.forEach(c=>{ G.cl[c.id]={cx:0,cap:c.cap,ct:1,base:1,dm:1,form:pick(Object.keys(FORM)),pat:0}; });
+  D.clubes.forEach(c=>{ G.cl[c.id]={cx:0,cap:c.cap,ct:1,base:1,enf:0,fis:0,perf:0,form:pick(Object.keys(FORM)),pat:0}; });
   D.clubes.forEach(c=>completarElenco(c.id));
   D.clubes.forEach(c=>{ const t=tier(c.div); G.cl[c.id].cx=Math.round({3:8e6,2:3.5e6,1:1.2e6}[t]*(.7+rnd()*.6)/1e4)*1e4; });
   iniciarTemporada();
@@ -309,9 +309,9 @@ const textoJanela = () => { const j=janela(); return j.aberta?`🟢 Janela abert
 function blocoContrato(p){
   const pedida=pedidaRenovacao(p), bl=(G.bloqRen||{})[p.id]>G.di, anos=UI.anosRen||3;
   return `<h3 style="margin-top:14px">Contrato</h3><div class="kv"><span>Salário atual</span><b>${din(salDe(p))} por jogo</b></div><div class="kv"><span>Duração</span><b class="${p.ct<=1?"neg":""}">${p.ct<=1?"último ano":p.ct+" temporadas"}</b></div>
-  ${p.ct<=2?(bl?`<p class="neg" style="font-size:13px">O empresário pediu um tempo antes de voltar a conversar.</p>`:`<div class="mut" style="font-size:13px;margin:8px 0 6px">Ele pede ${din(pedida)} por jogo. Luva = 4 salários.</div>
+  ${(G.negRen||{})[p.id]?((G.negRen[p.id].contra)?`<div class="card" style="border-color:var(--ac);margin-top:8px">📨 <b>Contraproposta do empresário:</b> ${din(G.negRen[p.id].sal)} por jogo, ${G.negRen[p.id].anos} temporada(s), luva de ${din(G.negRen[p.id].sal*4)}.<div class="row" style="margin-top:8px"><button class="sm pri grow" onclick="responderContra('${p.id}',true)">Aceitar</button><button class="sm grow" onclick="responderContra('${p.id}',false)">Recusar</button></div></div>`:`<p class="ac" style="font-size:13px">📨 Proposta enviada. O empresário responde em ${Math.max(1,G.negRen[p.id].resp-(G.abs||0))} rodada(s).</p>`):p.ct<=2?(bl?`<p class="neg" style="font-size:13px">O empresário pediu um tempo antes de voltar a conversar.</p>`:`<div class="mut" style="font-size:13px;margin:8px 0 6px">Ele pede ${din(pedida)} por jogo. Luva = 4 salários.</div>
   <div class="row" style="gap:6px;margin-bottom:8px">${[1,2,3,4].map(a=>`<span class="chip ${anos===a?"on":""}" style="flex:1;text-align:center" onclick="UI.anosRen=${a};ficha('${p.id}')">${a} ${a>1?"anos":"ano"}</span>`).join("")}</div>
-  ${[[.9,"Abaixo da pedida"],[1,"Na pedida"],[1.15,"Acima da pedida"]].map(([f,l])=>{ const sal=Math.round(pedida*f/10)*10; return `<button class="op" onclick="renovar('${p.id}',${f})"><span class="pct">${Math.round(chanceRenovar(p,f)*100)}%</span>${l}: ${din(sal)}/jogo<small>Luva de ${din(sal*4)}</small></button>`; }).join("")}`):""}`;
+  ${[[.9,"Abaixo da pedida"],[1,"Na pedida"],[1.15,"Acima da pedida"]].map(([f,l])=>{ const sal=Math.round(pedida*f/10)*10; return `<button class="op" onclick="enviarRenovacao('${p.id}',${f})"><span class="pct">${Math.round(chanceRenovar(p,f)*100)}%</span>${l}: ${din(sal)}/jogo<small>Luva de ${din(sal*4)}</small></button>`; }).join("")}`):""}`;
 }
 
 function gerarRodadas(ids){
@@ -336,6 +336,193 @@ function iniciarTemporada(){
 }
 function sortearCopa(){ const v=embaralhar(G.copa.vivos.slice()); G.copa.chave=[]; for(let i=0;i<v.length;i+=2) G.copa.chave.push([v[i],v[i+1]]); }
 function rankForca(cid){ const dv=G.div[cid]; return clubesDaDiv(dv).sort((a,b)=>forca(b)-forca(a)).indexOf(cid)+1; }
+/* ---------- estrutura: obras com prazo e departamento médico em 3 alas ---------- */
+// dur = rodadas (datas) para concluir; base = custo do nível 1 (multiplicado pelo nível e pela divisão)
+const OBRAS={
+  ct:{n:"Centro de treinamento",e:"🏋️",d:"Todo o elenco evolui mais rápido no dia a dia.",base:600e3,max:5,dur:4,min:1},
+  base:{n:"Categorias de base",e:"🌱",d:"Revelações mais frequentes, com mais sucesso e potencial.",base:400e3,max:5,dur:4,min:1},
+  enf:{n:"Enfermaria",e:"🩺",d:"Prevenção: menos lesões durante os jogos (até −50%).",base:300e3,max:5,dur:3,min:0},
+  fis:{n:"Fisioterapia",e:"🦵",d:"Lesionados voltam mais cedo (até −2 jogos).",base:300e3,max:5,dur:3,min:0},
+  perf:{n:"Performance",e:"🏃",d:"O físico recupera mais rápido entre os jogos (até +4).",base:300e3,max:5,dur:3,min:0},
+};
+const MAX_OBRAS_TEMP=3, CUSTO_ARQ=2.5e6, DUR_ARQ=6;
+function estruturaInit(c){ if(c.enf===undefined){ const n=Math.max(0,(c.dm||1)-1); c.enf=n; c.fis=n; c.perf=n; } }
+function custoObra(k){ const c=G.cl[G.clubeId]; return OBRAS[k].base*(c[k]+1)*{1:1,2:2,3:4}[tier(G.div[G.clubeId])]; }
+const obrasDoClube = () => (G.obras||[]).filter(o=>o.cid===G.clubeId);
+const obrasNaTemporada = () => (G.obrasIni||[]).filter(o=>o.temp===G.temp&&o.cid===G.clubeId).length;
+function podeObra(){ return obrasNaTemporada()<MAX_OBRAS_TEMP; }
+function obra(k){
+  const c=G.cl[G.clubeId], v=custoObra(k);
+  if(c[k]>=OBRAS[k].max||c.cx<v||obrasDoClube().some(o=>o.k===k)) return;
+  if(!podeObra()) return toast(`Limite de ${MAX_OBRAS_TEMP} obras por temporada.`);
+  c.cx-=v; G.fin.obras+=v; G.abs=G.abs||0;
+  (G.obras=G.obras||[]).push({cid:G.clubeId,k,fim:G.abs+OBRAS[k].dur});
+  (G.obrasIni=G.obrasIni||[]).push({cid:G.clubeId,temp:G.temp});
+  noticia(`🏗️ Obra iniciada: ${OBRAS[k].n} nível ${c[k]+1} (${OBRAS[k].dur} rodadas).`); salvar(); render();
+}
+function ampliar(){
+  const c=G.cl[G.clubeId];
+  if(c.cx<CUSTO_ARQ||obrasDoClube().some(o=>o.k==="cap")) return;
+  if(!podeObra()) return toast(`Limite de ${MAX_OBRAS_TEMP} obras por temporada.`);
+  c.cx-=CUSTO_ARQ; G.fin.obras+=CUSTO_ARQ; G.abs=G.abs||0;
+  (G.obras=G.obras||[]).push({cid:G.clubeId,k:"cap",fim:G.abs+DUR_ARQ});
+  (G.obrasIni=G.obrasIni||[]).push({cid:G.clubeId,temp:G.temp});
+  noticia(`🏗️ Obra iniciada: ampliação do estádio (+5.000 lugares, ${DUR_ARQ} rodadas).`); salvar(); render();
+}
+function concluirObras(){
+  const prontas=(G.obras||[]).filter(o=>o.fim<=G.abs);
+  prontas.forEach(o=>{ const c=G.cl[o.cid]; if(o.k==="cap"){ c.cap+=5000; if(o.cid===G.clubeId) noticia("🏟️ Ampliação concluída: +5.000 lugares no estádio!"); } else { c[o.k]++; if(o.cid===G.clubeId) noticia(`🏗️ ${OBRAS[o.k].n} chegou ao nível ${c[o.k]}!`); } });
+  G.obras=(G.obras||[]).filter(o=>o.fim>G.abs);
+}
+const reducaoLesao = () => [0,.1,.2,.3,.4,.5][G.cl[G.clubeId].enf||0];
+const fisReducao = () => [0,0,1,1,2,2][G.cl[G.clubeId].fis||0];
+const perfBonus = () => [0,1,2,2,3,4][G.cl[G.clubeId].perf||0];
+
+/* ---------- categorias de base: revelações ao longo da temporada ---------- */
+const ARQUETIPOS=[
+  {id:"veloz",n:"Veloz",e:"💨",d:"Explosão e arranque. Deixa o marcador no chão.",pos:["ATA","ML","LAT"]},
+  {id:"tecnico",n:"Técnico",e:"🎩",d:"Drible e visão. O jogo passa pelos pés dele.",pos:["MC","ML"]},
+  {id:"artilheiro",n:"Artilheiro",e:"🎯",d:"Faro de gol. Vive dentro da área.",pos:["ATA"]},
+  {id:"muralha",n:"Muralha",e:"🛡️",d:"Força e marcação. Ninguém passa.",pos:["ZAG","LAT"]},
+  {id:"cerebro",n:"Cérebro",e:"🧠",d:"Passe e leitura de jogo. O maestro.",pos:["MC"]},
+  {id:"paredao",n:"Paredão",e:"🧤",d:"Reflexo de gato e personalidade no gol.",pos:["GOL"]},
+];
+const MENTALIDADES=[
+  {id:"dedicado",n:"Dedicado",e:"🔥",d:"Primeiro a chegar, último a sair. Evolui mais rápido.",p:3},
+  {id:"tranquilo",n:"Tranquilo",e:"😌",d:"Cabeça boa, constante. Evolução estável.",p:5},
+  {id:"rebelde",n:"Rebelde",e:"😤",d:"Talento e temperamento. Pode explodir… ou se perder.",p:2},
+];
+const OLHEIROS=["Seu Lourival da várzea","Dona Cida do Juvenil","Professor Barbosa","Tião Peneira","Mestre Gerson","Zé do Apito","Professor Joel","Seu Nonato"];
+const FRASES_JOIA={
+  joia:["Nunca vi um moleque assim. Daqui a pouco tá na seleção.","Esse é de outro planeta. Anota o nome.","Talento de geração. Se não chegar lá, foi porque não quis."],
+  promessa:["Muito bom de bola. Com trabalho, chega longe.","Tem coisa diferente nesse garoto.","Esse aí vai dar trabalho pros zagueiros."],
+  bom:["Garoto esforçado, dá pra lapidar.","Tem futuro, mas precisa de paciência.","Bom de grupo, bom de treino."],
+  aposta:["É uma aposta. Às vezes dá certo.","Ainda cru, mas tem vontade.","Não é craque, mas não desiste nunca."],
+};
+const FALHAS_BASE=["O garoto se machucou nos testes e não pôde ser avaliado.","Um clube maior chegou primeiro e levou o menino.","Nos testes finais ele não correspondeu ao que prometia.","Problemas familiares fizeram o garoto voltar pra casa.","O olheiro se empolgou demais: o nível não era o esperado."];
+const SUCESSO_BASE=[.55,.63,.72,.81,.9], INTERVALO_BASE=[[7,9],[6,8],[5,7],[4,6],[3,5]];
+const maxBase = () => (G.cl[G.clubeId].base||1)+1;
+function rotuloPot(j){ const f=forca(G.clubeId), d=j.pot-f; return d>=10?["joia","💎 Joia rara"]:d>=4?["promessa","⭐ Grande promessa"]:d>=-2?["bom","👍 Bom potencial"]:["aposta","🎲 Aposta"]; }
+function gerarJovem(lvl,tipo){
+  const arq=pick(ARQUETIPOS), ment=sortearPeso(MENTALIDADES,m=>m.p), f=forca(G.clubeId);
+  const ovr0=Math.round(clamp(f-(tipo==="peneira"?ri(28,34):24-lvl*2-ri(0,6)),30,90));
+  let pot=ovr0+10+ri(0,6+lvl*3); if(rnd()<.08+lvl*.02) pot+=8;
+  const rebeldeExplode=ment.id==="rebelde"?rnd()<.5:null;
+  return {id:"b"+(G.seq++),n:String.fromCharCode(65+ri(0,25))+". "+pick(SOBRENOMES),a:ri(15,17),pos:pick(arq.pos),ovr:ovr0,pot:clamp(pot,0,97),arq:arq.id,ment:ment.id,rebx:rebeldeExplode,olh:pick(OLHEIROS)};
+}
+function proxRevelacao(){ const iv=INTERVALO_BASE[(G.cl[G.clubeId].base||1)-1]; return ri(iv[0],iv[1]); }
+function verificarBase(){
+  G.basej=G.basej||[]; if(G.proxRev===undefined) G.proxRev=proxRevelacao();
+  // garotos da base evoluem devagar enquanto esperam a promoção
+  G.basej.forEach(j=>{ const m=j.ment==="dedicado"?1.5:j.ment==="rebelde"?(j.rebx?2:.3):1; if(j.ovr<j.pot&&rnd()<.08*m*(1+.1*G.cl[G.clubeId].ct)) j.ovr++; });
+  if(--G.proxRev>0) return;
+  G.proxRev=proxRevelacao();
+  if(G.basej.length>=maxBase()) return;
+  const lvl=G.cl[G.clubeId].base||1;
+  if(rnd()<SUCESSO_BASE[lvl-1]){ const j=gerarJovem(lvl); G.basej.push(j); G.novaRev=j.id; noticia(`🌱 Revelação na base: ${j.n} (${j.pos}), apresentado por ${j.olh}.`); }
+  else noticia(`🌱 A base quase revelou alguém, mas… ${pick(FALHAS_BASE)}`);
+}
+function cartaoJovem(j,acoes){
+  const a=ARQUETIPOS.find(x=>x.id===j.arq), m=MENTALIDADES.find(x=>x.id===j.ment), [, rot]=rotuloPot(j);
+  return `<div class="card" style="margin-bottom:8px"><div class="row"><span class="pp ${j.pos}">${j.pos}</span><b class="grow">${esc(j.n)} <span class="mut" style="font-weight:500">${j.a} anos</span></b><span class="ovr">${j.ovr}</span></div>
+  <div style="margin-top:6px"><span class="tag">${a.e} ${a.n}</span><span class="tag">${m.e} ${m.n}</span><span class="tag">${rot}</span></div>${acoes||""}</div>`;
+}
+function abrirRevelacao(id){
+  const j=(G.basej||[]).find(x=>x.id===id); G.novaRev=null; salvar(); if(!j) return render();
+  const [k,rot]=rotuloPot(j), a=ARQUETIPOS.find(x=>x.id===j.arq), m=MENTALIDADES.find(x=>x.id===j.ment);
+  render();
+  modal(`<div class="lance-t">🌱 REVELAÇÃO NA BASE</div><p class="center mut">${esc(j.olh)} chegou com novidade:</p>
+  <div class="center" style="font-size:22px;font-weight:800;font-family:'Barlow Condensed',sans-serif">${esc(j.n)}</div><div class="center"><span class="pp ${j.pos}">${j.pos}</span> · ${j.a} anos · overall ${j.ovr}</div>
+  <p class="center" style="font-style:italic;font-size:16px">“${esc(pick(FRASES_JOIA[k]))}”</p>
+  <div class="kv"><span>${a.e} ${a.n}</span><span class="mut" style="font-size:13px;text-align:right">${a.d}</span></div><div class="kv"><span>${m.e} ${m.n}</span><span class="mut" style="font-size:13px;text-align:right">${m.d}</span></div><div class="kv"><span>Potencial</span><b>${rot}</b></div>
+  <div class="mut" style="font-size:12px;margin:6px 0">O potencial exato é segredo — nem o garoto sabe.</div><button class="pri" style="width:100%" onclick="fecharModal();UI.aba='elenco';UI.elAba='base';render()">Ver na base</button>`);
+}
+function promoverJovem(id){
+  const j=(G.basej||[]).find(x=>x.id===id); if(!j) return;
+  if(G.el[G.clubeId].length>=26) return toast("Elenco cheio (26).");
+  const p=novoJogador(G.clubeId,j.pos,j.ovr,j.a,j.pot); p.n=j.n; p.ment=j.ment; p.rebx=j.rebx; p.ct=3; p.base=1;
+  G.basej=G.basej.filter(x=>x.id!==id); noticia(`⬆️ ${p.n} subiu da base para o time profissional.`);
+  tecInit(); G.tec.promovidos=(G.tec.promovidos||0)+1; if(G.tec.promovidos>=3) conquistar("formador3");
+  salvar(); render();
+}
+function dispensarJovem(id){ G.basej=(G.basej||[]).filter(x=>x.id!==id); salvar(); render(); }
+const custoPeneira = () => Math.round(G.cl[G.clubeId].pat*1.5/1000)*1000;
+function abrirPeneira(){
+  if(G.peneiraTemp===G.temp) return toast("Só uma peneira por temporada.");
+  const c=G.cl[G.clubeId], v=custoPeneira(); if(c.cx<v) return toast("Caixa insuficiente para a peneira.");
+  c.cx-=v; G.fin.obras+=v; G.peneiraTemp=G.temp;
+  const lvl=c.base||1; G.peneira=Array.from({length:ri(4,6)},()=>gerarJovem(lvl,"peneira"));
+  noticia(`📣 Peneira da base: ${G.peneira.length} garotos apareceram para os testes.`); salvar(); render(); verPeneira();
+}
+function verPeneira(){
+  const vagas=maxBase()-(G.basej||[]).length;
+  modal(`<div class="lance-t">📣 PENEIRA DA BASE</div><p class="center mut">A maioria não tem nível, mas de vez em quando aparece uma joia. Vagas na base: <b>${vagas}</b></p>
+  ${(G.peneira||[]).map(j=>cartaoJovem(j,`<div class="row" style="margin-top:8px"><button class="sm pri grow" ${vagas<=0?"disabled":""} onclick="aprovarPeneira('${j.id}')">Aprovar para a base</button></div>`)).join("")||`<p class="mut">Ninguém mais nos testes.</p>`}
+  <button style="width:100%" onclick="G.peneira=[];salvar();fecharModal();render()">Encerrar a peneira</button>`);
+}
+function aprovarPeneira(id){ const j=(G.peneira||[]).find(x=>x.id===id); if(!j||(G.basej||[]).length>=maxBase()) return; (G.basej=G.basej||[]).push(j); G.peneira=G.peneira.filter(x=>x.id!==id); salvar(); verPeneira(); }
+function abaBase(){
+  G.basej=G.basej||[]; const c=G.cl[G.clubeId], lvl=c.base||1;
+  return `<div class="card"><div class="row"><div class="grow"><b>${OBRAS.base.e} Categorias de base · nível ${lvl}</b><div class="mut" style="font-size:13px">Vagas: ${G.basej.length}/${maxBase()} · sucesso nas revelações ${Math.round(SUCESSO_BASE[lvl-1]*100)}% · próxima em ~${Math.max(1,G.proxRev||0)} rodada(s)</div></div></div>
+  <button style="width:100%;margin-top:8px;text-transform:none" ${G.peneiraTemp===G.temp?"disabled":""} onclick="abrirPeneira()">📣 Promover peneira na região — ${din(custoPeneira())}${G.peneiraTemp===G.temp?" (já feita nesta temporada)":""}</button></div>
+  ${G.basej.map(j=>cartaoJovem(j,`<div class="row" style="margin-top:8px"><button class="sm pri grow" onclick="promoverJovem('${j.id}')">⬆️ Subir pro profissional</button><button class="sm per" onclick="dispensarJovem('${j.id}')">Dispensar</button></div>`)).join("")||`<div class="card mut">Nenhum garoto na base ainda. As revelações chegam ao longo da temporada — ou promova uma peneira.</div>`}`;
+}
+const fatorMent = p => p.ment==="dedicado"?1.5:p.ment==="rebelde"?(p.rebx?2:.3):1;
+
+/* ---------- renovação com resposta do empresário ---------- */
+function enviarRenovacao(pid,f){
+  const p=G.jog[pid], anos=UI.anosRen||3, sal=Math.round(pedidaRenovacao(p)*f/10)*10;
+  G.bloqRen=G.bloqRen||{}; G.negRen=G.negRen||{};
+  if(G.negRen[pid]) return toast("Já existe uma proposta em análise.");
+  if(G.bloqRen[pid]>G.di) return toast("O empresário pediu um tempo. Tente daqui a algumas rodadas.");
+  if(G.cl[G.clubeId].cx<sal*4) return toast("Sem caixa para a luva.");
+  G.abs=G.abs||0; G.negRen[pid]={sal,anos,ch:chanceRenovar(p,f),resp:G.abs+ri(1,2)};
+  noticia(`📨 Proposta de renovação enviada a ${p.n}. O empresário vai analisar.`); toast("Proposta enviada!"); salvar(); render(); ficha(pid);
+}
+function processarRenovacoes(forcar){
+  const N=G.negRen||{};
+  for(const pid of Object.keys(N)){
+    const n=N[pid], p=G.jog[pid];
+    if(!p||p.c!==G.clubeId){ delete N[pid]; continue; }
+    if(n.contra){ if(forcar){ delete N[pid]; noticia(`📄 A contraproposta de ${p.n} expirou.`); } continue; }
+    if(!forcar&&n.resp>G.abs) continue;
+    if(rnd()<n.ch){ delete N[pid]; assinarRenovacao(p,n.sal,n.anos); }
+    else if(!forcar&&rnd()<.5){ n.contra=true; n.sal=Math.round(n.sal*1.12/10)*10; noticia(`📨 O empresário de ${p.n} fez uma contraproposta: ${din(n.sal)} por jogo. Veja na ficha dele.`); }
+    else { delete N[pid]; G.bloqRen=G.bloqRen||{}; G.bloqRen[pid]=G.di+3; p.mor=clamp(p.mor-5,15,95); noticia(`📨 ${p.n} recusou a proposta de renovação e ficou incomodado.`); }
+  }
+}
+function assinarRenovacao(p,sal,anos){
+  const c=G.cl[G.clubeId], luva=sal*4;
+  if(c.cx<luva){ noticia(`📨 ${p.n} aceitou, mas não havia caixa para a luva (${din(luva)}). Negócio desfeito.`); return false; }
+  c.cx-=luva; p.sal=sal; p.ct=anos; p.mor=clamp(p.mor+5,15,95); noticia(`✍️ ${p.n} renovou por ${anos} temporada(s): ${din(sal)} por jogo.`); return true;
+}
+function responderContra(pid,aceita){
+  const n=(G.negRen||{})[pid], p=G.jog[pid]; if(!n) return;
+  delete G.negRen[pid];
+  if(aceita){ if(assinarRenovacao(p,n.sal,n.anos)) toast(`${p.n} renovou!`); }
+  else { p.mor=clamp(p.mor-4,15,95); G.bloqRen=G.bloqRen||{}; G.bloqRen[pid]=G.di+3; noticia(`📨 Você recusou a contraproposta de ${p.n}.`); }
+  salvar(); render(); ficha(pid);
+}
+
+/* ---------- venda: pedir mais ---------- */
+function pedirMais(i){
+  const o=G.ofertas[i], p=G.jog[o.pid]; if(!o||o.final) return;
+  const r=rnd();
+  if(r<.45){ o.valor=Math.round(o.valor*1.15/1000)*1000; o.final=true; noticia(`💬 ${CL[o.clube].n} subiu para ${din(o.valor)} por ${p.n}. Oferta final: é pegar ou largar.`); toast("Subiram a oferta!"); }
+  else if(r<.8){ o.final=true; noticia(`💬 ${CL[o.clube].n} mantém ${din(o.valor)} por ${p.n}. Não sobe nem um real.`); toast("Mantiveram a oferta."); }
+  else { G.ofertas.splice(i,1); noticia(`💬 ${CL[o.clube].n} desistiu de ${p.n} depois do seu pedido.`); toast("Desistiram do negócio."); }
+  salvar(); render();
+}
+
+/* ---------- caixa no vermelho ---------- */
+function controlarVermelho(){
+  const c=G.cl[G.clubeId];
+  if(c.cx>=0){ G.vermelho=0; return false; }
+  G.vermelho=(G.vermelho||0)+1;
+  if(G.vermelho===8) noticia("🏦 O banco ligou: o clube está há 8 rodadas no vermelho. O conselho quer explicações.");
+  if(G.vermelho===16) noticia("🏦 Situação insustentável: 16 rodadas no vermelho. O conselho avalia sua permanência.");
+  return G.vermelho>=24;
+}
 /* ---------- técnico: desempenho, conquistas e estilos ---------- */
 const GESTAO={
   Motivador:{e:"🔥",d:"Vitória empolga mais o elenco (+moral), mas derrota derruba mais."},
@@ -374,6 +561,7 @@ const CONQUISTAS=[
   ["vitorias100","💯","Centenário","Alcance 100 vitórias na carreira"],["lenda","⭐","Lenda","Chegue a 90 de reputação"],
   ["jeff","🎸","Cuidado com o Jeff","Tenha um jogador de 40+ em campo pelo Atletic Rock"],["saldao","🫥","Saldão do Amnésia","Veja o presidente do Amnésia vender seus veteranos"],
   ["bahia","🐀","Você me vende o Bahia?","Venda um jogador do Rato da Gama ao Amnésia"],["talento","⛏️","Te falta talento","Tenha um garoto dispensado pelo presidente do Guará"],
+  ["formador3","⬆️","Da base ao profissional","Suba 3 garotos da base para o time principal"],
   ["wo","📝","Esqueceram de mim","Tenha um jogo de Copa decidido por W.O. do Amnésia"],["peixe","🐟","Peixe emprestado","Tenha um jogador emprestado pelo Big Fish ao Colorado"],
 ];
 function tecInit(){
@@ -522,7 +710,7 @@ function diretrizes(){
     {ic:"🏗️",area:"Infraestrutura",txt:"Investir na estrutura (obra ou ampliação)",ok:()=>nivelEstrutura()>G.ini.est},
   ];
 }
-function nivelEstrutura(){ const c=G.cl[G.clubeId]; return c.ct+c.base+c.dm+c.cap/5000; }
+function nivelEstrutura(){ const c=G.cl[G.clubeId]; estruturaInit(c); return c.ct+c.base+c.enf+c.fis+c.perf+c.cap/5000+(G.obras||[]).filter(o=>o.cid===G.clubeId).length; }
 function iconeObjetivo(){ const tx=G.obj.txt; return /título/.test(tx)?"🏆":/acesso/.test(tx)?"⬆️":/top 5/.test(tx)?"📈":/rebaix|últimas/.test(tx)?"🛟":"⚖️"; }
 function avaliacaoAnterior(){
   const h=G.tec.hist[G.tec.hist.length-1];
@@ -552,7 +740,7 @@ function telaReuniao(){
 const PEDIDOS=[
   {l:"💰 Pedir verba para reforços",ch:()=>clamp(G.conf/100*.9,.1,.85),ok:()=>{ const v=G.cl[G.clubeId].pat*5; G.cl[G.clubeId].cx+=v; G.conf=clamp(G.conf-4,0,100); return `Aprovado: ${din(v)} na conta. Mas agora a cobrança aumenta (-4 de confiança).`; },nao:()=>{ G.conf=clamp(G.conf-3,0,100); return "Pedido negado. E ele não gostou de ouvir (-3 de confiança)."; }},
   {l:"🧘 Pedir paciência com o trabalho",ch:()=>clamp(.75-G.conf/200,.2,.7),ok:()=>{ G.conf=clamp(G.conf+7,0,100); return "Ele topou dar mais tempo ao projeto (+7 de confiança)."; },nao:()=>{ G.conf=clamp(G.conf-4,0,100); return "“Paciência se conquista com resultado.” (-4 de confiança)"; }},
-  {l:"🏗️ Pedir investimento na estrutura",ch:()=>clamp(G.conf/100*.6,.1,.6),ok:()=>{ const c=G.cl[G.clubeId], k=["ct","base","dm"].filter(x=>c[x]<5).sort((a,b)=>c[a]-c[b])[0]; if(!k) return "A estrutura já está no máximo. Ele riu e mudou de assunto."; c[k]++; return `Liberado! ${OBRAS[k][0]} sobe para o nível ${c[k]}, por conta da diretoria.`; },nao:()=>{ G.conf=clamp(G.conf-2,0,100); return "“Primeiro o time, depois o tijolo.” (-2 de confiança)"; }},
+  {l:"🏗️ Pedir investimento na estrutura",ch:()=>clamp(G.conf/100*.6,.1,.6),ok:()=>{ const c=G.cl[G.clubeId], k=["ct","base","enf","fis","perf"].filter(x=>c[x]<5).sort((a,b)=>c[a]-c[b])[0]; if(!k) return "A estrutura já está no máximo. Ele riu e mudou de assunto."; c[k]++; return `Liberado! ${OBRAS[k].n} sobe para o nível ${c[k]}, por conta da diretoria.`; },nao:()=>{ G.conf=clamp(G.conf-2,0,100); return "“Primeiro o time, depois o tijolo.” (-2 de confiança)"; }},
 ];
 function humorPresidente(){ return G.conf>=70?"Pode falar, técnico. Estou satisfeito com o trabalho.":G.conf>=40?"Estou ouvindo. Seja objetivo.":"Seja rápido. A situação não está boa e minha paciência acabou."; }
 function abrirConversa(){
@@ -684,7 +872,7 @@ function tickPartida(){
       if(c.am>=1){ c.out=true; c.verm=true; c.nota-=1.5; evento(M.min,i,"verm",`🟥 Segundo amarelo! ${nomeJ(c)} está expulso.`); if(L.user) M.pausa=true; }
       else { c.am=1; c.nota-=.3; evento(M.min,i,"am",`🟨 Amarelo para ${nomeJ(c)}.`); }
     } else if(rnd()<.0007){ const c=sortearPeso(at,x=>PESO_CARTAO[x.pos]); c.out=true; c.verm=true; c.nota-=1.5; evento(M.min,i,"verm",`🟥 Vermelho direto para ${nomeJ(c)}!`); if(L.user) M.pausa=true; }
-    if(L.user&&rnd()<.0009*(G.gramadoRuim>0&&M.j.casa===G.clubeId?2.5:1)){ const c=pick(at); c.les=true; evento(M.min,i,"les",`🚑 ${nomeJ(c)} sente e não tem condições de seguir.`); M.pausa=true; }
+    if(L.user&&rnd()<.0009*(G.gramadoRuim>0&&M.j.casa===G.clubeId?2.5:1)*(1-reducaoLesao())){ const c=pick(at); c.les=true; evento(M.min,i,"les",`🚑 ${nomeJ(c)} sente e não tem condições de seguir.`); M.pausa=true; }
     for(const x of ativos(L)) x.cond=Math.max(30,x.cond-(.13+rnd()*.1)*(L.ment==="O"?1.1:1)*(L.user?fatorCansaco():1)*climaAtual().c);
     if(!L.user){ // IA reage ao placar e mexe no time
       const dif=M.gols[i]-M.gols[1-i];
@@ -882,7 +1070,7 @@ function concluirPartida(){
   if(r.pen) evento(90,-1,"info",`🥅 Pênaltis: ${CL[j.casa].c} ${r.pen.c} x ${r.pen.f} ${CL[j.fora].c}`);
   evento(90,-1,"info","🏁 Fim de jogo.");
   M.fase="FIM"; M.fim=true; M.res=r;
-  const dm=G.cl[G.clubeId].dm;
+  const redFis=fisReducao();
   M.lados.forEach((L,i)=>{
     const dif=M.gols[i]-M.gols[1-i];
     M.todos.filter(x=>L.entraram.has(x.pid)).forEach(x=>{
@@ -893,7 +1081,7 @@ function concluirPartida(){
       if(!L.user) return;
       const mv=G.tec.gestao==="Motivador"?6:4; p.cond=x.cond; p.mor=clamp(p.mor+(dif>0?mv:dif<0?-mv:0),15,95);
       if(x.verm) p.sus=1; else if(x.am&&j.comp==="L"){ p.am++; if(p.am>=3){ p.am=0; p.sus=1; noticia(`${p.n} levou o 3º amarelo e está suspenso.`); } }
-      if(x.les){ p.les=Math.max(1,ri(1,6)-(dm-1)); noticia(`${p.n} se lesionou: fora por ${p.les} jogo(s).`); }
+      if(x.les){ p.les=Math.max(1,ri(1,6)-redFis); noticia(`${p.n} se lesionou: fora por ${p.les} jogo(s).`); }
     });
   });
 }
@@ -928,10 +1116,12 @@ function fecharData(resU){
   elenco(G.clubeId).forEach(p=>{
     const jg=jogou.has(p.id);
     if(!jg){ if(p.sus>0&&resU) p.sus--; if(p.les>0) p.les--; p.mor=clamp(p.mor-(G.xi.includes(p.id)?0:.6),15,95); }
-    p.cond=clamp(p.cond+(jg?11+eu.dm:26),0,100);
-    if(p.a<=24&&ovr(p)<p.pot&&rnd()<(.05+.025*eu.ct)*(jg?1.6:1)*(G.tec.gestao==="Formador"?1.4:1)){ p.d++; if(ovr(p)>=80) noticia(`📈 ${p.n} evoluiu para ${ovr(p)} de overall.`); }
+    p.cond=clamp(p.cond+(jg?12+perfBonus():26),0,100);
+    if(p.a<=24&&ovr(p)<p.pot&&rnd()<(.05+.025*eu.ct)*(jg?1.6:1)*(G.tec.gestao==="Formador"?1.4:1)*fatorMent(p)){ p.d++; if(ovr(p)>=80) noticia(`📈 ${p.n} evoluiu para ${ovr(p)} de overall.`); }
   });
   if(eu.cx<0) mudarConf(-2,"fin");
+  G.abs=(G.abs||0)+1; estruturaInit(eu); concluirObras(); verificarBase(); processarRenovacoes(false);
+  const quebrou=controlarVermelho();
   if(G.conf<30&&!G.avisoConf){ G.avisoConf=true; noticia(`📢 ${presDe(G.clubeId).n} cobra publicamente: “Do jeito que está, não dá para continuar.”`); }
   mercadoIA();
   if(G.gramadoRuim>0&&resU&&resU.casa===G.clubeId) G.gramadoRuim--;
@@ -940,7 +1130,8 @@ function fecharData(resU){
   if(G.di>=G.cal.length){ fimTemporada(); UI.tela="fim"; }
   else {
     UI.tela="jogo"; UI.aba="inicio";
-    if(G.conf<15&&G.di>=8){ demitir(); }
+    if(quebrou){ demitir("💸 Foram 24 rodadas seguidas no vermelho. O conselho encerrou seu ciclo por gestão financeira."); }
+    else if(G.conf<15&&G.di>=8){ demitir(); }
     else if(rnd()<.3) G.evento=sortearEvento();
   }
   salvar(); render();
@@ -1073,16 +1264,17 @@ const exigencia = cid => tier(G.div[cid])*18+(forca(cid)-80)*2;
 function clubesInteressados(n,teto){
   return Object.keys(G.cl).filter(id=>id!==G.clubeId&&exigencia(id)<=teto).sort((a,b)=>exigencia(b)-exigencia(a)).slice(0,12).sort(()=>rnd()-.5).slice(0,n);
 }
-function demitir(){
+function demitir(motivo){
   noticia(`❌ ${G.tec.nome} foi demitido do ${CL[G.clubeId].n}.`);
   G.tec.rep=clamp(G.tec.rep-5,5,100);
   let op=clubesInteressados(3,G.tec.rep-4); if(op.length<3) op=Object.keys(G.cl).filter(id=>id!==G.clubeId).sort((a,b)=>exigencia(a)-exigencia(b)).slice(0,3);
-  G.demitido={op,espera:0,chegam:ri(1,3),log:[]};
+  G.demitido={op,espera:0,chegam:ri(1,3),log:[],motivo:motivo||null}; G.vermelho=0;
 }
 const ESPERA=["📵 Nenhum contato hoje. O telefone não toca.","📰 Seu nome aparece nas rodas de conversa da imprensa.","☕ Mais um dia de espera. Algo pode surgir.","🤝 Contatos acontecendo nos bastidores…","📲 Um empresário liga dizendo que tem clube interessado."];
 function esperarTelefone(){ const d=G.demitido; d.espera++; d.log.push(d.espera>=d.chegam?"📨 Proposta formal recebida!":pick(ESPERA)); salvar(); render(); }
 function assumir(cid,motivo){
   tecInit(); if(!G.tec.clubes.includes(cid)) G.tec.clubes.push(cid); G.tec.desde[cid]=G.ano; if(G.tec.clubes.length>=3) conquistar("viajante");
+  estruturaInit(G.cl[cid]); G.basej=[]; G.proxRev=undefined; G.negRen={}; G.peneira=[]; G.novaRev=null; G.vermelho=0;
   G.clubeId=cid; G.conf=55; G.avisoConf=false; G.venda={}; G.ofertas=[]; G.demitido=null; G.reuniaoNova=true; G.form=G.cl[cid].form; G.ment="N"; MEMO={};
   elenco(cid).forEach(p=>{ if(!p.sal) p.sal=salario(p); if(p.ct===undefined) p.ct=ri(1,4); });
   autoEscalar(); definirObjetivo(); noticia(`${G.tec.nome} assume o ${CL[cid].n}${motivo?" "+motivo:""}.`);
@@ -1133,6 +1325,7 @@ function fimTemporada(){
   if(perfil==="Garimpeiro"){ const f=forca(eu); elenco(eu).filter(p=>p.a<=21&&ovr(p)<f-10&&rnd()<.5).slice(0,2).forEach(p=>{ G.el[eu]=G.el[eu].filter(x=>x!==p.id); G.xi=G.xi.map(x=>x===p.id?null:x); delete G.jog[p.id]; R.caricato.push(`⛏️ Te falta talento: o presidente dispensou ${p.n}.`); conquistar("talento"); }); }
   if(SENTINELAS.includes(eu)&&G.ano-((G.tec.desde||{})[eu]||G.ano)>=1){ R.demitido=true; R.motivo="💤 O presidente sumiu do jogo e o Admin inativou o clube. Você está livre no mercado."; }
   // contratos: quem estava no último ano e não renovou sai de graça
+  processarRenovacoes(true);
   R.saidas=[];
   for(const id of Object.keys(G.jog)){
     const p=G.jog[id]; if(!p) continue; p.ct=(p.ct||1)-1; if(p.ct>0) continue;
@@ -1153,8 +1346,8 @@ function fimTemporada(){
     }
   }
   while(G.el[eu].length<16){ const p=novoJogador(eu,pick(POS),forca(eu)-ri(8,14),ri(22,30)); R.livres=(R.livres||[]).concat(p.n); }
-  const base=G.cl[eu].base, f0=forca(eu);
-  for(let i=0;i<2;i++){ const o=Math.round(f0-22+base*2+ri(0,6)); const p=novoJogador(eu,pick(POS),o,ri(16,18),clamp(o+8+ri(0,4+base*2),0,97)); R.jovens.push(`${p.n} (${melhorPos(p)} ${ovr(p)})`); }
+  (G.basej||[]).forEach(j=>j.a++);
+  R.jovens=(G.basej||[]).map(j=>`${j.n} (${j.pos} ${j.ovr})`);
   G.venda={}; G.ofertas=[];
   // emprego
   if(G.conf<20){ R.demitido=true; G.tec.rep=clamp(G.tec.rep-4,5,100); }
@@ -1256,9 +1449,11 @@ function abaInicio(){
   const ev=G.evento!==null&&G.evento!==undefined?`<div class="card" style="border-color:var(--ac)"><h3>⚡ ${CAT_EV[EVENTOS[G.evento].cat]||"Decisão"}</h3><p>${EVENTOS[G.evento].t}</p>${EVENTOS[G.evento].ops.map((o,i)=>`<button style="width:100%;margin-bottom:6px;text-transform:none" onclick="escolherEvento(${i})">${o.l}</button>`).join("")}</div>`:"";
   const venc=G.di>=G.cal.length/2?elenco(G.clubeId).filter(p=>p.ct<=1).length:0;
   const avisoCt=venc?`<div class="card" style="border-color:var(--ac)"><div class="row"><div class="grow">📄 <b>${venc}</b> jogador(es) no último ano de contrato.</div><button class="sm" onclick="UI.elAba='contratos';irAba('elenco')">Ver</button></div></div>`:"";
+  const rev=G.novaRev?`<div class="card" style="border-color:var(--ok)"><div class="row"><div class="grow">🌱 <b>Revelação na base!</b> Um olheiro trouxe um garoto novo.</div><button class="sm pri" onclick="abrirRevelacao('${G.novaRev}')">Conhecer</button></div></div>`:"";
+  const verm=(G.vermelho||0)>=4?`<div class="card" style="border-color:var(--bad)">🏦 <b class="neg">${G.vermelho} rodadas no vermelho.</b> <span class="mut" style="font-size:13px">Com 24 seguidas, o conselho demite por gestão financeira.</span></div>`:"";
   const of=G.ofertas.length?`<div class="card" style="border-color:var(--ok)"><div class="row"><div class="grow">💰 Você tem <b>${G.ofertas.length}</b> proposta(s) por jogadores.</div><button class="sm" onclick="UI.mercAba='vender';irAba('mercado')">Ver</button></div></div>`:"";
   const ini=clamp(pos-3,0,7), mini=cl.slice(ini,ini+5).map((x,i)=>linhaTabela(x,ini+i,dv)).join("");
-  return `${ev}${prox}${of}${avisoCt}
+  return `${rev}${verm}${ev}${prox}${of}${avisoCt}
   <div class="card"><h3>Diretoria</h3><div class="row" style="margin-bottom:6px"><span style="font-size:24px">${PERFIS[presDe(G.clubeId).perfil].e}</span><div class="grow"><b>${esc(presDe(G.clubeId).n)}</b><div class="mut" style="font-size:12px">Presidente · ${presDe(G.clubeId).perfil}</div></div><button class="sm" onclick="abrirConversa()">💬 Reunião (${2-(G.reunioes||0)})</button></div><div class="kv"><span>${iconeObjetivo()} Objetivo</span><b>${G.obj.txt}</b></div>${diretrizes().map(d=>`<div class="kv" style="font-size:13px"><span class="mut">${d.ic} ${esc(d.txt)}</span><b class="${d.ok()?"pos":"mut"}">${d.ok()?"✓":"…"}</b></div>`).join("")}<div class="kv"><span>Posição atual</span><b>${cl[pos-1].j?pos+"º":"—"}</b></div><div style="margin-top:8px" class="row"><span class="mut">Confiança</span><div class="bar grow"><i style="width:${G.conf}%;background:${G.conf<25?"var(--bad)":G.conf<50?"var(--ac)":"var(--ok)"}"></i></div><b>${Math.round(G.conf)}</b></div>${G.conf<25?`<div class="neg" style="margin-top:6px;font-size:13px">A diretoria está perdendo a paciência.</div>`:""}</div>
   <div class="card"><h3>${DIV_NOME[dv]}</h3><table>${CAB_TAB}${mini}</table><button class="sm" style="margin-top:8px" onclick="irAba('mundo')">Tabela completa</button></div>
   <div class="card"><h3>Notícias</h3>${G.news.slice(0,7).map(n=>`<div style="padding:4px 0;border-bottom:1px solid var(--lin);font-size:14px">${esc(n.t)}</div>`).join("")||`<span class="mut">Nada por enquanto.</span>`}</div>`;
@@ -1286,7 +1481,8 @@ function statusJ(p){ return (p.c===G.clubeId&&p.ct<=1?"📄 ":"")+(p.les>0?`🚑
 function abaElenco(){
   contratosInit();
   const ps=elenco(G.clubeId).sort((a,b)=>POS.indexOf(melhorPos(a))-POS.indexOf(melhorPos(b))||ovr(b)-ovr(a)), tit=new Set(G.xi), venc=ps.filter(p=>p.ct<=1).length;
-  const chips=`<div class="chips"><span class="chip ${UI.elAba!=="contratos"?"on":""}" onclick="UI.elAba='jogadores';render()">Jogadores</span><span class="chip ${UI.elAba==="contratos"?"on":""}" onclick="UI.elAba='contratos';render()">Contratos${venc?` (${venc} vencendo)`:""}</span></div>`;
+  const chips=`<div class="chips"><span class="chip ${UI.elAba!=="contratos"&&UI.elAba!=="base"?"on":""}" onclick="UI.elAba='jogadores';render()">Jogadores</span><span class="chip ${UI.elAba==="contratos"?"on":""}" onclick="UI.elAba='contratos';render()">Contratos${venc?` (${venc} vencendo)`:""}</span><span class="chip ${UI.elAba==="base"?"on":""}" onclick="UI.elAba='base';render()">Base${(G.basej||[]).length?` (${G.basej.length})`:""}</span></div>`;
+  if(UI.elAba==="base") return chips+abaBase();
   if(UI.elAba==="contratos"){
     const grupo=(tit_,lst)=>lst.length?`<h3>${tit_} (${lst.length})</h3><div class="card">${lst.map(p=>`<div class="row clk" style="padding:6px 0;border-bottom:1px solid var(--lin);cursor:pointer" onclick="ficha('${p.id}')"><span class="pp ${melhorPos(p)}">${melhorPos(p)}</span><span class="grow trunc">${esc(p.n)} <span class="mut" style="font-size:12px">${p.a}a</span></span><span class="mut" style="font-size:12px">${din(salDe(p))}</span><span class="ovr">${ovr(p)}</span></div>`).join("")}</div>`:"";
     return chips+`<div class="card"><div class="kv"><span>Folha por jogo</span><b>${din(folha(G.clubeId))}</b></div><div class="kv"><span>Valor do elenco</span><b>${din(ps.reduce((s_,p)=>s_+valor(p),0))}</b></div><div class="mut" style="font-size:12px;margin-top:6px">Quem estiver no último ano e não renovar sai de graça no fim da temporada. Toque no jogador para renovar.</div></div>`
@@ -1377,7 +1573,7 @@ function abaMercado(){
   const chips=`<div class="chips"><span class="chip ${UI.mercAba==="comprar"?"on":""}" onclick="UI.mercAba='comprar';render()">Comprar</span><span class="chip ${UI.mercAba==="vender"?"on":""}" onclick="UI.mercAba='vender';render()">Vender${G.ofertas.length?" ("+G.ofertas.length+")":""}</span></div>`;
   if(UI.mercAba==="vender"){
     const lst=Object.keys(G.venda).map(id=>G.jog[id]).filter(Boolean);
-    return chips+`<div class="card"><h3>Propostas recebidas</h3>${G.ofertas.map((o,i)=>{ const p=G.jog[o.pid]; return `<div style="padding:8px 0;border-bottom:1px solid var(--lin)"><div class="row">${crest(o.clube,26)}<div class="grow"><b>${esc(p.n)}</b> <span class="mut">(${melhorPos(p)} ${ovr(p)}, vale ${din(valor(p))})</span><div class="mut" style="font-size:13px">${esc(CL[o.clube].n)} oferece <b class="pos">${din(o.valor)}</b></div></div></div><div class="row" style="margin-top:6px"><button class="sm pri grow" onclick="responderOferta(${i},true)">Aceitar</button><button class="sm grow" onclick="responderOferta(${i},false)">Recusar</button></div></div>`; }).join("")||`<span class="mut">Nenhuma proposta no momento.</span>`}</div>
+    return chips+`<div class="card"><h3>Propostas recebidas</h3>${G.ofertas.map((o,i)=>{ const p=G.jog[o.pid]; return `<div style="padding:8px 0;border-bottom:1px solid var(--lin)"><div class="row">${crest(o.clube,26)}<div class="grow"><b>${esc(p.n)}</b> <span class="mut">(${melhorPos(p)} ${ovr(p)}, vale ${din(valor(p))})</span><div class="mut" style="font-size:13px">${esc(CL[o.clube].n)} oferece <b class="pos">${din(o.valor)}</b></div></div></div><div class="row" style="margin-top:6px"><button class="sm pri grow" onclick="responderOferta(${i},true)">Aceitar</button>${o.final?"":`<button class="sm grow" onclick="pedirMais(${i})">Pedir mais</button>`}<button class="sm grow" onclick="responderOferta(${i},false)">Recusar</button></div>${o.final?`<div class="ac" style="font-size:12px;margin-top:4px">Oferta final: é pegar ou largar.</div>`:""}<div></div></div>`; }).join("")||`<span class="mut">Nenhuma proposta no momento.</span>`}</div>
     <div class="card"><h3>Lista de venda</h3>${lst.map(p=>`<div class="row clk" style="padding:6px 0;border-bottom:1px solid var(--lin);cursor:pointer" onclick="ficha('${p.id}')"><span class="pp ${melhorPos(p)}">${melhorPos(p)}</span><span class="grow trunc">${esc(p.n)}</span><span class="mut">${din(valor(p))}</span><span class="ovr">${ovr(p)}</span></div>`).join("")||`<span class="mut">Abra a ficha de um jogador no Elenco pra colocá-lo à venda. Propostas chegam ao longo das rodadas.</span>`}</div>`;
   }
   const cx=G.cl[G.clubeId].cx, jn=janela();
@@ -1390,17 +1586,13 @@ function abaMercado(){
 }
 
 /* ---------- clube ---------- */
-const OBRAS={ct:["Centro de treinamento","Jovens evoluem mais rápido",600e3],base:["Categorias de base","Melhores garotos a cada temporada",400e3],dm:["Departamento médico","Lesões mais curtas e recuperação melhor",300e3]};
-function custoObra(k){ const c=G.cl[G.clubeId]; return OBRAS[k][2]*c[k]*{1:1,2:2,3:4}[tier(G.div[G.clubeId])]; }
-function obra(k){ const c=G.cl[G.clubeId], v=custoObra(k); if(c[k]>=5||c.cx<v) return; c.cx-=v; c[k]++; G.fin.obras+=v; salvar(); render(); toast(OBRAS[k][0]+" nível "+c[k]); }
-const CUSTO_ARQ=2.5e6;
-function ampliar(){ const c=G.cl[G.clubeId]; if(c.cx<CUSTO_ARQ) return; c.cx-=CUSTO_ARQ; c.cap+=5000; G.fin.obras+=CUSTO_ARQ; salvar(); render(); toast("Estádio ampliado em 5.000 lugares"); }
 function abaClube(){
+  estruturaInit(G.cl[G.clubeId]);
   const c=G.cl[G.clubeId], s=CL[G.clubeId], pub=publico(G.clubeId,0), F=G.fin;
   return `<div class="card"><div class="est" style="background-image:url('${estadioUrl(G.clubeId)}')"></div><h3>${esc(s.est)}</h3>
   <div class="kv"><span>Capacidade</span><b>${c.cap.toLocaleString("pt-BR")}</b></div><div class="kv"><span>Público esperado hoje</span><b>${pub.toLocaleString("pt-BR")}${pub>=c.cap?" (lotado)":""}</b></div><div class="kv"><span>Ingresso</span><b>R$ ${PRECO_ING[tier(G.div[G.clubeId])]}</b></div>
-  <button style="width:100%;margin-top:8px;text-transform:none" ${c.cx<CUSTO_ARQ?"disabled":""} onclick="ampliar()">Ampliar +5.000 lugares — ${din(CUSTO_ARQ)}</button>${pub<c.cap?`<div class="mut" style="font-size:12px;margin-top:4px">O estádio ainda não lota: ampliar agora não rende. Subir na tabela (ou de divisão) aumenta a procura.</div>`:""}</div>
-  <div class="card"><h3>Estrutura</h3>${Object.keys(OBRAS).map(k=>`<div style="padding:7px 0;border-bottom:1px solid var(--lin)"><div class="row"><div class="grow"><b>${OBRAS[k][0]}</b> · nível ${c[k]}/5<div class="mut" style="font-size:12px">${OBRAS[k][1]}</div></div>${c[k]>=5?`<span class="pos">máx.</span>`:`<button class="sm" ${c.cx<custoObra(k)?"disabled":""} onclick="obra('${k}')">${din(custoObra(k))}</button>`}</div></div>`).join("")}</div>
+  ${(()=>{ const o=obrasDoClube().find(x=>x.k==="cap"); return o?`<div class="ac" style="margin-top:8px">🏗️ Ampliação em obras: fica pronta em ${o.fim-G.abs} rodada(s).</div>`:`<button style="width:100%;margin-top:8px;text-transform:none" ${c.cx<CUSTO_ARQ||!podeObra()?"disabled":""} onclick="ampliar()">Ampliar +5.000 lugares — ${din(CUSTO_ARQ)} · ${DUR_ARQ} rodadas</button>`; })()}${pub<c.cap?`<div class="mut" style="font-size:12px;margin-top:4px">O estádio ainda não lota: ampliar agora não rende. Subir na tabela (ou de divisão) aumenta a procura.</div>`:""}</div>
+  <div class="card"><h3>Estrutura</h3><div class="mut" style="font-size:12px;margin-bottom:4px">Obras desta temporada: ${obrasNaTemporada()}/${MAX_OBRAS_TEMP}. Cada uma leva algumas rodadas para ficar pronta.</div>${Object.keys(OBRAS).map(k=>{ const ob=obrasDoClube().find(o=>o.k===k); return `<div style="padding:7px 0;border-bottom:1px solid var(--lin)"><div class="row"><div class="grow"><b>${OBRAS[k].e} ${OBRAS[k].n}</b> · nível ${c[k]}/${OBRAS[k].max}<div class="mut" style="font-size:12px">${OBRAS[k].d}</div>${k==="enf"||k==="fis"||k==="perf"?`<div class="mut" style="font-size:11px">Departamento médico</div>`:""}</div>${ob?`<span class="ac" style="font-size:13px;text-align:right">🏗️ ${ob.fim-G.abs} rod.</span>`:c[k]>=OBRAS[k].max?`<span class="pos">máx.</span>`:`<button class="sm" ${c.cx<custoObra(k)||!podeObra()?"disabled":""} onclick="obra('${k}')">${din(custoObra(k))}<br><span style="font-size:11px;font-weight:500">${OBRAS[k].dur} rodadas</span></button>`}</div></div>`; }).join("")}</div>
   <div class="card"><h3>Finanças da temporada</h3><div class="kv"><span>Patrocínio</span><b class="pos">${din(F.pat)}</b></div><div class="kv"><span>Bilheteria</span><b class="pos">${din(F.bil)}</b></div><div class="kv"><span>Premiações</span><b class="pos">${din(F.prem)}</b></div><div class="kv"><span>Transferências</span><b class="${F.transf<0?"neg":"pos"}">${din(F.transf)}</b></div><div class="kv"><span>Salários</span><b class="neg">${din(-F.sal)}</b></div><div class="kv"><span>Obras</span><b class="neg">${din(-F.obras)}</b></div><div class="mut" style="font-size:12px;margin-top:6px">Por jogo: patrocínio ${din(c.pat)} · folha ${din(folha(G.clubeId))}</div></div>
   <button class="per" style="width:100%" onclick="if(confirm('Voltar à tela inicial? A carreira continua salva.')){UI.tela='capa';render()}">Sair para a tela inicial</button>`;
 }
@@ -1484,7 +1676,7 @@ function substituir(i,pid){
 function cartaoProposta(id){ return `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--lin)">${crest(id,36)}<div class="grow"><b>${esc(CL[id].n)}</b><div class="mut" style="font-size:12px">${DIV_NOME[G.div[id]]} · força ${Math.round(forca(id))} · caixa ${din(G.cl[id].cx)}</div></div><button class="sm pri" onclick="aceitarEmprego('${id}')">Assumir</button></div>`; }
 function telaDemitido(){
   const d=G.demitido, pronto=d.espera>=d.chegam;
-  return `<div class="heroi"><h1 class="neg">DEMITIDO</h1><p>${esc(presDe(G.clubeId).n)} chamou você na sala e encerrou o contrato.<br><span class="mut">Agora é esperar o mercado se mexer.</span></p></div>
+  return `<div class="heroi"><h1 class="neg">DEMITIDO</h1><p>${G.demitido.motivo?esc(G.demitido.motivo)+"<br>":esc(presDe(G.clubeId).n)+" chamou você na sala e encerrou o contrato.<br>"}<span class="mut">Agora é esperar o mercado se mexer.</span></p></div>
   ${d.log.length?`<div class="card">${d.log.map((l,i)=>`<div style="padding:4px 0">Dia ${i+1}: ${esc(l)}</div>`).join("")}</div>`:""}
   ${pronto?`<h3>Propostas</h3>${d.op.map(id=>`<div class="card">${cartaoProposta(id)}<p class="mut" style="font-size:13px;font-style:italic;margin:6px 0 0">“${esc(sabor(id))}”</p></div>`).join("")}`:`<button class="pri" style="width:100%" onclick="esperarTelefone()">📞 Esperar o telefone tocar</button>`}`;
 }
@@ -1499,7 +1691,7 @@ function telaFim(){
   ${R.tabela?`<div class="card"><h3>Classificação final · ${DIV_NOME[R.div]}</h3><table>${CAB_TAB.replace('<th class="n">J</th>','')}${R.tabela.map((x,i)=>{ const z=R.div==="CB"?(i>=9?"z3":""):tier(R.div)===2?(i===0?"z1":i===1?"z2":i>=8?"z3":""):(i===0?"z1":""); return `<tr class="${z} ${x[0]===R.clube?"eu":""}"><td class="n">${i+1}</td><td><div class="row">${crest(x[0],18)}<span class="trunc">${esc(CL[x[0]].c)}</span></div></td><td class="n"><b>${x[1]}</b></td><td class="n">${x[2]}</td><td class="n">${x[3]}</td><td class="n">${x[4]}</td><td class="n">${x[5]>0?"+":""}${x[5]}</td></tr>`; }).join("")}</table></div>`:""}
   ${R.fin?`<div class="card"><h3>💰 Balanço financeiro</h3><div class="kv"><span>Entradas (patrocínio, bilheteria, prêmios)</span><b class="pos">${din(R.fin.pat+R.fin.bil+R.fin.prem)}</b></div><div class="kv"><span>Salários e obras</span><b class="neg">${din(-(R.fin.sal+R.fin.obras))}</b></div><div class="kv"><span>Saldo de transferências</span><b class="${R.fin.transf<0?"neg":"pos"}">${din(R.fin.transf)}</b></div><div class="kv"><span>Caixa agora</span><b class="ac">${din(G.cl[R.clube].cx)}</b></div></div>`:""}
   <div class="card"><h3>Campeões</h3>${R.copa?`<div class="kv"><span>Copa do Brasil</span><b>${esc(CL[R.copa].c)}</b></div>`:""}${DIVS.map(d=>`<div class="kv"><span>${DIV_NOME[d]}</span><b>${esc(CL[R.campeoes[d]].c)}</b></div>`).join("")}</div>
-  <div class="card"><h3>Elenco</h3><p>🌱 Subiram da base: ${R.jovens.map(esc).join(", ")}</p>${(R.caricato||[]).map(t=>`<p>${esc(t)}</p>`).join("")}${(R.voltaram||[]).length?`<p>↩️ Voltaram de empréstimo: ${R.voltaram.map(esc).join(", ")}</p>`:""}${(R.saidas||[]).length?`<p>📄 Contrato encerrado, saíram de graça: ${R.saidas.map(esc).join(", ")}</p>`:""}${(()=>{ const v=G.el[R.clube]&&R.clube===G.clubeId?elenco(R.clube).filter(p=>p.ct<=1):[]; return v.length?`<p>⚠️ Entram no último ano de contrato: ${v.map(p=>esc(p.n)).join(", ")} — renove durante a temporada.</p>`:""; })()}${(R.livres||[]).length?`<p>🆓 A diretoria completou o elenco com jogadores livres: ${R.livres.map(esc).join(", ")}</p>`:""}${R.aposentados.length?`<p>👋 Penduraram as chuteiras: ${R.aposentados.map(esc).join(", ")}</p>`:""}</div>
+  <div class="card"><h3>Elenco</h3><p>🌱 Na base: ${R.jovens.length?R.jovens.map(esc).join(", "):"ninguém por enquanto"}</p>${(R.caricato||[]).map(t=>`<p>${esc(t)}</p>`).join("")}${(R.voltaram||[]).length?`<p>↩️ Voltaram de empréstimo: ${R.voltaram.map(esc).join(", ")}</p>`:""}${(R.saidas||[]).length?`<p>📄 Contrato encerrado, saíram de graça: ${R.saidas.map(esc).join(", ")}</p>`:""}${(()=>{ const v=G.el[R.clube]&&R.clube===G.clubeId?elenco(R.clube).filter(p=>p.ct<=1):[]; return v.length?`<p>⚠️ Entram no último ano de contrato: ${v.map(p=>esc(p.n)).join(", ")} — renove durante a temporada.</p>`:""; })()}${(R.livres||[]).length?`<p>🆓 A diretoria completou o elenco com jogadores livres: ${R.livres.map(esc).join(", ")}</p>`:""}${R.aposentados.length?`<p>👋 Penduraram as chuteiras: ${R.aposentados.map(esc).join(", ")}</p>`:""}</div>
   ${R.demitido?`<div class="card" style="border-color:var(--bad)"><h3 class="neg">${R.motivo?"Fim da linha":"Você foi demitido"}</h3>${R.motivo?`<p>${esc(R.motivo)}</p>`:""}<p>Escolha onde recomeçar:</p>${R.propostas.map(id=>`${cartaoProposta(id)}<p class="mut" style="font-size:13px;font-style:italic;margin:4px 0 8px">“${esc(sabor(id))}”</p>`).join("")}</div>`:
     `${R.propostas.length?`<div class="card" style="border-color:var(--ok)"><h3>Propostas de emprego</h3>${R.propostas.map(id=>`${cartaoProposta(id)}<p class="mut" style="font-size:13px;font-style:italic;margin:4px 0 8px">“${esc(sabor(id))}”</p>`).join("")}</div>`:""}<button class="pri" style="width:100%" onclick="novaTemporada()">Começar a temporada ${R.ano+1} ▶</button>`}`;
 }
