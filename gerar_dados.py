@@ -124,10 +124,19 @@ def main():
         for c in clubes:
             resto = [j for j in elencos.get(c["id"], []) if j["id"] not in usados and j["pos"] in POS_ELENCO]
             adultos = [j for j in resto if j["a"] > IDADE_MAX_PROMESSA]
+            jovens = [j for j in resto if j["a"] <= IDADE_MAX_PROMESSA]
+            ops = lambda j, pos: sum(j["at"].get(x, 0) for x in OPS[pos])
+            faltam = 0
             for pos, n in VAGAS_RESERVA:
-                cand = sorted([j for j in adultos if POS_ELENCO[j["pos"]] == pos], key=lambda j: -ovr_na_posicao(j["at"], pos))[:n]
+                cand = sorted([j for j in adultos if POS_ELENCO[j["pos"]] == pos], key=lambda j: -ops(j, pos))[:n]
+                # vaga sem adulto da posição: completa com o melhor garoto da base daquela posição
+                cand += sorted([j for j in jovens if POS_ELENCO[j["pos"]] == pos], key=lambda j: -ops(j, pos))[:n - len(cand)]
+                faltam += n - len(cand)
                 for j in cand:
-                    adultos.remove(j); usados.add(j["id"]); reservas.append(jogador_do_elenco(j, c["id"]))
+                    (adultos if j in adultos else jovens).remove(j); usados.add(j["id"]); reservas.append(jogador_do_elenco(j, c["id"]))
+            # ainda faltando: o melhor garoto da base de qualquer posição
+            for j in sorted(jovens, key=lambda j: -ops(j, POS_ELENCO[j["pos"]]))[:faltam]:
+                jovens.remove(j); usados.add(j["id"]); reservas.append(jogador_do_elenco(j, c["id"]))
             for j in resto:
                 if j["a"] <= IDADE_MAX_PROMESSA and j["id"] not in usados:
                     usados.add(j["id"]); pr = jogador_do_elenco(j, c["id"])
